@@ -92,7 +92,7 @@ static inline Clay_Dimensions Raylib_MeasureText(Clay_StringSlice text, Clay_Tex
     Font* fonts = (Font*)userData;
     Font fontToUse = fonts[config->fontId];
     // Font failed to load, likely the fonts are in the wrong place relative to the execution dir.
-    // RayLib ships with a default font, so we can continue with that built in one. 
+    // RayLib ships with a default font, so we can continue with that built in one.
     if (!fontToUse.glyphs) {
         fontToUse = GetFontDefault();
     }
@@ -111,7 +111,7 @@ static inline Clay_Dimensions Raylib_MeasureText(Clay_StringSlice text, Clay_Tex
         else lineTextWidth += (fontToUse.recs[index].width + fontToUse.glyphs[index].offsetX);
 
         // NOTE: added this myself
-        //lineTextWidth += config->letterSpacing;
+        lineTextWidth += textHeight / 20.0f;
     }
 
     maxTextWidth = fmax(maxTextWidth, lineTextWidth);
@@ -154,21 +154,21 @@ void Clay_Raylib_Render(Clay_RenderCommandArray renderCommands, Font* fonts)
             case CLAY_RENDER_COMMAND_TYPE_TEXT: {
                 Clay_TextRenderData *textData = &renderCommand->renderData.text;
                 Font fontToUse = fonts[textData->fontId];
-    
+
                 int strlen = textData->stringContents.length + 1;
-    
+
                 if(strlen > temp_render_buffer_len) {
                     // Grow the temp buffer if we need a larger string
                     if(temp_render_buffer) free(temp_render_buffer);
                     temp_render_buffer = malloc(strlen);
                     temp_render_buffer_len = strlen;
                 }
-    
+
                 // Raylib uses standard C strings so isn't compatible with cheap slices, we need to clone the string to append null terminator
                 memcpy(temp_render_buffer, textData->stringContents.chars, textData->stringContents.length);
                 temp_render_buffer[textData->stringContents.length] = '\0';
                 DrawTextEx(fontToUse, temp_render_buffer, (Vector2){boundingBox.x, boundingBox.y}, (float)textData->fontSize, (float)textData->letterSpacing, CLAY_COLOR_TO_RAYLIB_COLOR(textData->textColor));
-    
+
                 break;
             }
             case CLAY_RENDER_COMMAND_TYPE_IMAGE: {

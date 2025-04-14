@@ -40,6 +40,9 @@ typedef struct {
 struct Game {
     size_t size;
 
+    Clay_Context *clay;
+    Font font;
+
     Objects objects;
     Camera2D camera;
 
@@ -50,6 +53,10 @@ struct Game {
 };
 
 Game *g;
+
+void handle_clay_error(Clay_ErrorData error) {
+    nob_log(ERROR, "Clay Error: %.*s", error.errorText.length, error.errorText.chars);
+}
 
 void game_init(void) {
     g = malloc(sizeof(*g));
@@ -65,6 +72,13 @@ void game_init(void) {
 
     g->camera.zoom = 1;
     g->camera.target = (Vector2) { (float)GetScreenWidth() / 2, (float)GetScreenHeight() / 2 };
+
+    uint64_t total_memory_size = Clay_MinMemorySize();
+    Clay_Arena clay_arena = Clay_CreateArenaWithCapacityAndMemory(total_memory_size, malloc(total_memory_size));
+
+    g->font = LoadFont("./fonts/Alegreya-Regular.ttf");
+    g->clay = Clay_Initialize(clay_arena, (Clay_Dimensions) { GetScreenWidth(), GetScreenHeight() }, (Clay_ErrorHandler) { handle_clay_error, 0 });
+    Clay_SetMeasureTextFunction(Raylib_MeasureText, &g->font);
 }
 
 Game* game_pre_reload(void) {
@@ -79,13 +93,25 @@ void game_post_reload(Game *new_g) {
         memset((char*)g + g->size, 0, sizeof(*g) - g->size);
         g->size = sizeof(*g);
     }
+
+    // The addresses of the functions may shift after hot-reloading so
+    // we must set them again
+    // Clay also uses internally a Clay__currentContext global variable, whose address
+    // (and value) also shifts after the reload. Hence keeping track of it ourselves
+    Clay_SetCurrentContext(g->clay);
+    Clay_SetMeasureTextFunction(Raylib_MeasureText, &g->font);
+    g->clay->errorHandler = (Clay_ErrorHandler) { handle_clay_error, 0 };
 }
 
 #define DEBUG(fmt, value, x, y) DrawText(TextFormat("%s = "fmt, #value, value), x, y, 20, LIME)
 
 void game_update(void) {
+    Clay_SetLayoutDimensions((Clay_Dimensions) { GetScreenWidth(), GetScreenHeight() });
+    Clay_SetPointerState((Clay_Vector2) { GetMouseX(), GetMouseY() }, IsMouseButtonDown(MOUSE_BUTTON_LEFT));
+    Vector2 wheel_v = GetMouseWheelMoveV();
+    Clay_UpdateScrollContainers(true, (Clay_Vector2) { wheel_v.x, wheel_v.y }, GetFrameTime());
+
     g->camera.offset = (Vector2) { (float)GetScreenWidth() / 2, (float)GetScreenHeight() / 2 };
-    //g->camera.offset = (Vector2) { 0 };
 
     float wheel = GetMouseWheelMove();
     g->camera.zoom *= wheel / 20.0f + 1;
@@ -161,8 +187,22 @@ void game_update(void) {
         g->prev_mouse_cursor = mouse_cursor;
     }
 
+    Clay_BeginLayout();
+    CLAY({
+        .id = CLAY_ID("HelloWorld"),
+        //.layout.layoutDirection = CLAY_TOP_TO_BOTTOM,
+        .layout.sizing = { CLAY_SIZING_GROW(), CLAY_SIZING_GROW() },
+        .backgroundColor = {24, 24, 24, 255},
+    }) {
+        uint16_t font_size = 50;
+        Clay_TextElementConfig *config = CLAY_TEXT_CONFIG({.fontSize = font_size, .textColor = {255, 255, 255, 255}, });
+        CLAY_TEXT(CLAY_STRING("Hello, World!"), config);
+        CLAY_TEXT(CLAY_STRING("Foo, Bar!"), config);
+    }
+    Clay_RenderCommandArray commands = Clay_EndLayout();
+
     Drawing() {
-        ClearBackground(BLACK);
+        Clay_Raylib_Render(commands, &g->font);
 
         Mode2D(g->camera) {
             da_foreach(Object, object, &g->objects) {

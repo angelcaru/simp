@@ -4,3 +4,4 @@ CompileFlags:
     - "-I../raylib"
     - "-I../clay"
     - "-xc"
+    - "-std=gnu11"

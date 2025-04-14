@@ -47,6 +47,7 @@ void usage(FILE *stream, const char *program_name) {
 }
 
 void common_cflags(Cmd *cmd) {
+    cmd_append(cmd, "-std=gnu11");
     cmd_append(cmd, "-Wall", "-Wextra", "-g");
     cmd_append(cmd, "-I.", "-I./raylib/", "-I./clay/");
 }
