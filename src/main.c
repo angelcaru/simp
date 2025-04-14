@@ -60,7 +60,7 @@ void set_libgame_to_be_reloaded(int unused_arg_for_sigaction) {
 
 int main(void) {
     SetConfigFlags(FLAG_WINDOW_RESIZABLE);
-    InitWindow(640, 480, "My Raylib App");
+    InitWindow(640, 480, "Image Editor");
 
     if (!load_libgame()) return 1;
 
