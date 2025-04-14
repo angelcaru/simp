@@ -276,6 +276,10 @@ void game_update(void) {
     Vector2 wheel_v = GetMouseWheelMoveV();
     Clay_UpdateScrollContainers(true, (Clay_Vector2) { wheel_v.x, wheel_v.y }, GetFrameTime());
 
+    if (IsKeyPressed(KEY_D)) {
+        Clay_SetDebugModeEnabled(!Clay_IsDebugModeEnabled());
+    }
+
     Rectangle main_area;
     CustomLayoutElement get_bounding_box = {
         .type = CUSTOM_LAYOUT_ELEMENT_TYPE_GET_BOUNDING_BOX,
@@ -311,24 +315,31 @@ void game_update(void) {
                 .textColor = {255, 255, 255, 255},
             });
 
-            da_foreach(Object, object, &g->objects) {
-                CLAY({
-                    .layout.sizing = { CLAY_SIZING_GROW(), CLAY_SIZING_FIT() },
-                    .layout.layoutDirection = CLAY_LEFT_TO_RIGHT,
-                }) {
-                    Clay_String name = {
-                        .chars = object->name,
+            CLAY({
+                .id = CLAY_ID("ObjectList"),
+                .layout.sizing = { CLAY_SIZING_GROW(), CLAY_SIZING_GROW() },
+                .layout.layoutDirection = CLAY_TOP_TO_BOTTOM,
+                .scroll.vertical = true,
+            }) {
+                da_foreach(Object, object, &g->objects) {
+                    CLAY({
+                        .layout.sizing = { CLAY_SIZING_GROW(), CLAY_SIZING_FIT() },
+                        .layout.layoutDirection = CLAY_LEFT_TO_RIGHT,
+                    }) {
+                        Clay_String name = {
+                            .chars = object->name,
                         .length = object->name_len,
                         .isStaticallyAllocated = false,
-                    };
-                    CLAY_TEXT(name, text_config);
+                        };
+                        CLAY_TEXT(name, text_config);
 
-                    CLAY({ .layout.sizing = { CLAY_SIZING_GROW(), CLAY_SIZING_GROW() } });
+                        CLAY({ .layout.sizing = { CLAY_SIZING_GROW(), CLAY_SIZING_GROW() } });
 
-                    if (button((Clay_ElementId) {0}, CLAY_STRING("Remove")).pressed) {
-                        size_t i = object - g->objects.items;
-                        memmove(object, object + 1, g->objects.count - i - 1);
-                        g->objects.count -= 1;
+                        if (button((Clay_ElementId) {0}, CLAY_STRING("Remove")).pressed) {
+                            size_t i = object - g->objects.items;
+                            memmove(object, object + 1, g->objects.count - i - 1);
+                            g->objects.count -= 1;
+                        }
                     }
                 }
             }
