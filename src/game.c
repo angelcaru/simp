@@ -25,7 +25,7 @@
 #define MOUSE_BUTTON_PAN MOUSE_BUTTON_RIGHT
 #define MOUSE_BUTTON_MOVE_OBJECT MOUSE_BUTTON_LEFT
 
-#define OBJECT_RESIZE_HITBOX_SIZE 80
+#define OBJECT_RESIZE_HITBOX_SIZE 30
 
 typedef struct {
     Texture texture;
@@ -121,7 +121,7 @@ void game_update(void) {
         g->camera.target = Vector2Subtract(g->camera.target, mouse_delta);
     }
 
-    float object_resize_hitbox_size = OBJECT_RESIZE_HITBOX_SIZE;
+    float object_resize_hitbox_size = OBJECT_RESIZE_HITBOX_SIZE / g->camera.zoom;
 
     bool is_move_down = IsMouseButtonDown(MOUSE_BUTTON_MOVE_OBJECT);
 
