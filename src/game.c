@@ -20,7 +20,9 @@
 #define BEGIN_END(begin, end) BEGIN_END_NAMED(begin, end, MACRO_VAR(i))
 #define Drawing() BEGIN_END(BeginDrawing(), EndDrawing())
 #define Mode2D(camera) BEGIN_END(BeginMode2D(camera), EndMode2D())
-#define Mode3D(camera) BEGIN_END(BeginMode3D(camera), EndMode3D())
+#define ScissorMode(x, y, w, h) BEGIN_END(BeginScissorMode(x, y, w, h), EndScissorMode())
+#define ScissorModeRec(rec) ScissorMode((rec).x, (rec).y, (rec).width, (rec).height)
+#define TextureMode(texture) BEGIN_END(BeginTextureMode(texture), EndTextureMode())
 
 #define MOUSE_BUTTON_PAN MOUSE_BUTTON_RIGHT
 #define MOUSE_BUTTON_MOVE_OBJECT MOUSE_BUTTON_LEFT
@@ -101,6 +103,19 @@ void game_post_reload(Game *new_g) {
     Clay_SetCurrentContext(g->clay);
     Clay_SetMeasureTextFunction(Raylib_MeasureText, &g->font);
     g->clay->errorHandler = (Clay_ErrorHandler) { handle_clay_error, 0 };
+}
+
+void button(Clay_ElementId id, Clay_String text) {
+    CLAY({
+        .id = id,
+        .layout.padding = { .left = 5, .right = 5 },
+        .backgroundColor = { 100, 100, 100, 255 },
+        .cornerRadius = CLAY_CORNER_RADIUS(5),
+    }) {
+        uint16_t font_size = 30;
+        Clay_TextElementConfig *config = CLAY_TEXT_CONFIG({.fontSize = font_size, .textColor = {255, 255, 255, 255}, });
+        CLAY_TEXT(text, config);
+    }
 }
 
 #define DEBUG(fmt, value, x, y) DrawText(TextFormat("%s = "fmt, #value, value), x, y, 20, LIME)
@@ -187,30 +202,48 @@ void game_update(void) {
         g->prev_mouse_cursor = mouse_cursor;
     }
 
+    Rectangle main_area;
+    CustomLayoutElement get_bounding_box = {
+        .type = CUSTOM_LAYOUT_ELEMENT_TYPE_GET_BOUNDING_BOX,
+        .customData.boundingBoxPtr = &main_area,
+    };
+
     Clay_BeginLayout();
     CLAY({
-        .id = CLAY_ID("HelloWorld"),
-        //.layout.layoutDirection = CLAY_TOP_TO_BOTTOM,
+        .id = CLAY_ID("Root"),
         .layout.sizing = { CLAY_SIZING_GROW(), CLAY_SIZING_GROW() },
-        .backgroundColor = {24, 24, 24, 255},
+        .backgroundColor = {0, 0, 0, 255},
     }) {
-        uint16_t font_size = 50;
-        Clay_TextElementConfig *config = CLAY_TEXT_CONFIG({.fontSize = font_size, .textColor = {255, 255, 255, 255}, });
-        CLAY_TEXT(CLAY_STRING("Hello, World!"), config);
-        CLAY_TEXT(CLAY_STRING("Foo, Bar!"), config);
+        CLAY({
+            .id = CLAY_ID("Sidebar"),
+            .layout.sizing = { CLAY_SIZING_PERCENT(0.33), CLAY_SIZING_PERCENT(1) },
+            .layout.layoutDirection = CLAY_TOP_TO_BOTTOM,
+            .layout.childGap = 5,
+            .layout.padding = { .left = 10, .top = 10 },
+            .backgroundColor = {50, 50, 50, 255},
+        }) {
+            button(CLAY_ID("PanButton"), CLAY_STRING("Pan"));
+            button(CLAY_ID("MoveButton"), CLAY_STRING("Move"));
+        }
+        CLAY({
+            .id = CLAY_ID("MainArea"),
+            .layout.sizing = { CLAY_SIZING_GROW(), CLAY_SIZING_GROW() },
+            .custom = { &get_bounding_box },
+        });
     }
     Clay_RenderCommandArray commands = Clay_EndLayout();
 
     Drawing() {
+        ClearBackground(GetColor(0xFF00FFFF));
         Clay_Raylib_Render(commands, &g->font);
 
-        Mode2D(g->camera) {
+        ScissorModeRec(main_area) Mode2D(g->camera) {
             da_foreach(Object, object, &g->objects) {
                 Rectangle source = { 0, 0, object->texture.width, object->texture.height };
                 DrawTexturePro(object->texture, source, object->rec, Vector2Zero(), 0.0f, WHITE);
             }
         }
 
-        DrawFPS(10, 10);
+        //DrawFPS(10, 10);
     }
 }

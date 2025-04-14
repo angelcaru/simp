@@ -1,3 +1,5 @@
+// NOTE: this file has been modified from the original clay.h distribution to better suit my needs
+
 #include "raylib.h"
 #include "raymath.h"
 #include "stdint.h"
@@ -12,7 +14,8 @@ Camera Raylib_camera;
 
 typedef enum
 {
-    CUSTOM_LAYOUT_ELEMENT_TYPE_3D_MODEL
+    CUSTOM_LAYOUT_ELEMENT_TYPE_3D_MODEL,
+    CUSTOM_LAYOUT_ELEMENT_TYPE_GET_BOUNDING_BOX,
 } CustomLayoutElementType;
 
 typedef struct
@@ -28,6 +31,7 @@ typedef struct
     CustomLayoutElementType type;
     union {
         CustomLayoutElement_3DModel model;
+        Rectangle *boundingBoxPtr;
     } customData;
 } CustomLayoutElement;
 
@@ -248,6 +252,13 @@ void Clay_Raylib_Render(Clay_RenderCommandArray renderCommands, Font* fonts)
                             DrawModel(customElement->customData.model.model, positionRay.position, customElement->customData.model.scale * scaleValue, WHITE);        // Draw 3d model with texture
                         EndMode3D();
                         break;
+                    }
+                    case CUSTOM_LAYOUT_ELEMENT_TYPE_GET_BOUNDING_BOX: {
+                        Clay_BoundingBox box = renderCommand->boundingBox;
+                        customElement->customData.boundingBoxPtr->x = box.x;
+                        customElement->customData.boundingBoxPtr->y = box.y;
+                        customElement->customData.boundingBoxPtr->width = box.width;
+                        customElement->customData.boundingBoxPtr->height = box.height;
                     }
                     default: break;
                 }
