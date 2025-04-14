@@ -46,7 +46,7 @@ void usage(FILE *stream, const char *program_name) {
 void common_cflags(Cmd *cmd) {
     cmd_append(cmd, "-std=gnu11");
     cmd_append(cmd, "-Wall", "-Wextra", "-g");
-    cmd_append(cmd, "-I.", "-I./raylib/", "-I./clay/");
+    cmd_append(cmd, "-I.", "-I./raylib/", "-I./clay/", "-I./tinyfiledialogs/");
 }
 
 int main(int argc, char **argv) {
@@ -112,7 +112,7 @@ int main(int argc, char **argv) {
             cmd_append(&cmd, "cc");
             common_cflags(&cmd);
             cmd_append(&cmd, "-o", "./build/main");
-            cmd_append(&cmd, "./src/main.c", "./tinyfiledialogs.c");
+            cmd_append(&cmd, "./src/main.c");
             cmd_append(&cmd, "-L./raylib/", "-l:libraylib.so.550", "-lm");
             cmd_append(&cmd, "-DHOTRELOAD");
             if (!nob_cmd_run_sync_and_reset(&cmd)) return 1;
@@ -121,7 +121,7 @@ int main(int argc, char **argv) {
             common_cflags(&cmd);
             cmd_append(&cmd, "-shared", "-fPIC");
             cmd_append(&cmd, "-o", "./build/libgame.so");
-            cmd_append(&cmd, "./src/game.c");
+            cmd_append(&cmd, "./src/game.c", "./tinyfiledialogs/tinyfiledialogs.c");
             cmd_append(&cmd, "-L./raylib/", "-l:libraylib.so.550", "-lm");
             cmd_append(&cmd, "-DHOTRELOAD");
 #endif // _WIN32
@@ -130,7 +130,7 @@ int main(int argc, char **argv) {
             cmd_append(&cmd, "x86_64-w64-mingw32-gcc");
             common_cflags(&cmd);
             cmd_append(&cmd, "-o", "./build/main.exe");
-            cmd_append(&cmd, "./src/main.c", "./src/game.c", "./tinyfiledialogs.c");
+            cmd_append(&cmd, "./src/main.c", "./src/game.c", "./tinyfiledialogs/tinyfiledialogs.c");
             cmd_append(&cmd, "-L./raylib/", "-lraylib.win", "-lm");
             cmd_append(&cmd, "-lwinmm", "-lgdi32");
             break;

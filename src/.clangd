@@ -3,5 +3,6 @@ CompileFlags:
     - "-I.."
     - "-I../raylib"
     - "-I../clay"
+    - "-I../tinyfiledialogs"
     - "-xc"
     - "-std=gnu11"

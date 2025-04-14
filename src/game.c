@@ -1,4 +1,5 @@
 #include "game.h"
+#include "tinyfiledialogs/tinyfiledialogs.h"
 
 #include <string.h>
 #include <unistd.h>
@@ -12,6 +13,8 @@
 #define CLAY_IMPLEMENTATION
 #include "clay.h"
 #include "clay_renderer_raylib.c"
+
+#include "tinyfiledialogs.h"
 
 Clay_String clay_string_from_cstr(const char *cstr) {
     return (Clay_String) { .chars = cstr, .length = strlen(cstr), .isStaticallyAllocated = false };
@@ -49,6 +52,17 @@ typedef struct {
         Texture as_texture;
     };
 } Object;
+
+void object_unload(Object *object) {
+    switch (object->type) {
+        case OBJ_TEXTURE:
+            UnloadTexture(object->as_texture);
+            break;
+        case OBJ_RECT:
+            break;
+        default: UNREACHABLE("invalid object type: you have a memory corruption somewhere. good luck");
+    }
+}
 
 void object_set_name(Object *object, String_View name) {
     size_t count = name.count;
@@ -96,15 +110,6 @@ void game_init(void) {
     g = malloc(sizeof(*g));
     memset(g, 0, sizeof(*g));
     g->size = sizeof(*g);
-
-    const char *path = "C_Logo.png";
-    Texture texture = LoadTexture(path);
-    Object object = {
-        .as_texture = texture,
-        .rec = { 0, 0, texture.width, texture.height },
-    };
-    object_set_name(&object, sv_from_cstr(path));
-    da_append(&g->objects, object);
 
     g->camera.zoom = 1;
     g->camera.target = (Vector2) { (float)GetScreenWidth() / 2, (float)GetScreenHeight() / 2 };
@@ -195,7 +200,7 @@ void update_main_area(void) {
     bool is_move_down = IsMouseButtonDown(MOUSE_BUTTON_MOVE_OBJECT);
     Vector2 mouse_pos = GetScreenToWorld2D(GetMousePosition(), g->camera);
     int mouse_cursor = MOUSE_CURSOR_DEFAULT;
-    if (g->tool == TOOL_MOVE) {
+    if (g->tool == TOOL_MOVE && g->objects.count > 0) {
         for (Object *object = g->objects.items + g->objects.count - 1; object >= g->objects.items; object--) {
             Rectangle top_resize_hitbox = {
                 object->rec.x, object->rec.y - object_resize_hitbox_size / 2.0f,
@@ -302,6 +307,32 @@ void game_update(void) {
         }) {
             if (button(CLAY_ID("MoveButton"), CLAY_STRING("Move")).pressed) g->tool = TOOL_MOVE;
             if (button(CLAY_ID("RectangleButton"), CLAY_STRING("Rectangle")).pressed) g->tool = TOOL_RECT;
+            if (button(CLAY_ID("AddImageButton"), CLAY_STRING("Add Image")).pressed) {
+                const char *filter_patterns[] = { "*.png", "*.jpg", "*.tga", "*.bmp", "*.psd", "*.gif", "*.hdr", "*.pic", "*.ppm" };
+                const char *path = tinyfd_openFileDialog("Add Image", NULL, ARRAY_LEN(filter_patterns), filter_patterns, "Image", 0);
+                Texture texture = LoadTexture(path);
+                Object object = {
+                    .as_texture = texture,
+                    .rec = { 0, 0, texture.width, texture.height },
+                };
+                String_View path_sv = sv_from_cstr(path);
+                assert(path_sv.count > 0);
+                int i;
+                for (i = path_sv.count - 1; i >= 0; i--) {
+                    if (
+                        path_sv.data[i] == '/'
+                    #ifdef _WIN32
+                        || path_sv.data[i] == '\\'
+                    #endif
+                    ) {
+                        i++;
+                        break;
+                    }
+                }
+                path_sv = sv_from_parts(path_sv.data + i, path_sv.count - i);
+                object_set_name(&object, path_sv);
+                da_append(&g->objects, object);
+            }
 
             CLAY({ .layout.sizing = { CLAY_SIZING_GROW(), CLAY_SIZING_GROW() }});
 
@@ -328,14 +359,16 @@ void game_update(void) {
                     }) {
                         Clay_String name = {
                             .chars = object->name,
-                        .length = object->name_len,
-                        .isStaticallyAllocated = false,
+                            .length = object->name_len,
+                            .isStaticallyAllocated = false,
                         };
                         CLAY_TEXT(name, text_config);
 
                         CLAY({ .layout.sizing = { CLAY_SIZING_GROW(), CLAY_SIZING_GROW() } });
 
                         if (button((Clay_ElementId) {0}, CLAY_STRING("Remove")).pressed) {
+                            object_unload(object);
+
                             size_t i = object - g->objects.items;
                             memmove(object, object + 1, g->objects.count - i - 1);
                             g->objects.count -= 1;
