@@ -1,5 +1,6 @@
 #include "game.h"
 
+#include <string.h>
 #include <unistd.h>
 
 #ifdef HOTRELOAD
@@ -10,8 +11,11 @@
 
 #define CLAY_IMPLEMENTATION
 #include "clay.h"
-
 #include "clay_renderer_raylib.c"
+
+Clay_String clay_string_from_cstr(const char *cstr) {
+    return (Clay_String) { .chars = cstr, .length = strlen(cstr), .isStaticallyAllocated = false };
+}
 
 #include "raylib.h"
 #include "raymath.h"
@@ -35,13 +39,23 @@ typedef enum {
     OBJ_RECT,
 } Object_Type;
 
+#define OBJ_NAME_MAX 128
 typedef struct {
     Object_Type type;
     Rectangle rec;
+    char name[OBJ_NAME_MAX];
+    size_t name_len;
     union {
         Texture as_texture;
     };
 } Object;
+
+void object_set_name(Object *object, String_View name) {
+    size_t count = name.count;
+    if (count > OBJ_NAME_MAX) count = OBJ_NAME_MAX;
+    memcpy(object->name, name.data, count);
+    object->name_len = count;
+}
 
 typedef struct {
     Object *items;
@@ -83,11 +97,13 @@ void game_init(void) {
     memset(g, 0, sizeof(*g));
     g->size = sizeof(*g);
 
-    Texture texture = LoadTexture("C_Logo.png");
+    const char *path = "C_Logo.png";
+    Texture texture = LoadTexture(path);
     Object object = {
         .as_texture = texture,
         .rec = { 0, 0, texture.width, texture.height },
     };
+    object_set_name(&object, sv_from_cstr(path));
     da_append(&g->objects, object);
 
     g->camera.zoom = 1;
@@ -180,7 +196,7 @@ void update_main_area(void) {
     Vector2 mouse_pos = GetScreenToWorld2D(GetMousePosition(), g->camera);
     int mouse_cursor = MOUSE_CURSOR_DEFAULT;
     if (g->tool == TOOL_MOVE) {
-        for (Object *object = g->objects.items + g->objects.count - 1; object > g->objects.items; object--) {
+        for (Object *object = g->objects.items + g->objects.count - 1; object >= g->objects.items; object--) {
             Rectangle top_resize_hitbox = {
                 object->rec.x, object->rec.y - object_resize_hitbox_size / 2.0f,
                 object->rec.width, object_resize_hitbox_size,
@@ -245,6 +261,7 @@ void update_main_area(void) {
                 .type = OBJ_RECT,
                 .rec = get_current_rect(),
             };
+            object_set_name(&object, sv_from_cstr(temp_sprintf("Rectangle (%.0fx%.0f)", object.rec.width, object.rec.height)));
             da_append(&g->objects, object);
         }
     }
@@ -252,6 +269,8 @@ void update_main_area(void) {
 }
 
 void game_update(void) {
+    size_t temp_checkpoint = temp_save();
+
     Clay_SetLayoutDimensions((Clay_Dimensions) { GetScreenWidth(), GetScreenHeight() });
     Clay_SetPointerState((Clay_Vector2) { GetMouseX(), GetMouseY() }, IsMouseButtonDown(MOUSE_BUTTON_LEFT));
     Vector2 wheel_v = GetMouseWheelMoveV();
@@ -274,11 +293,45 @@ void game_update(void) {
             .layout.sizing = { CLAY_SIZING_PERCENT(0.33), CLAY_SIZING_PERCENT(1) },
             .layout.layoutDirection = CLAY_TOP_TO_BOTTOM,
             .layout.childGap = 5,
-            .layout.padding = { .left = 10, .top = 10 },
+            .layout.padding = CLAY_PADDING_ALL(10),
             .backgroundColor = {50, 50, 50, 255},
         }) {
             if (button(CLAY_ID("MoveButton"), CLAY_STRING("Move")).pressed) g->tool = TOOL_MOVE;
             if (button(CLAY_ID("RectangleButton"), CLAY_STRING("Rectangle")).pressed) g->tool = TOOL_RECT;
+
+            CLAY({ .layout.sizing = { CLAY_SIZING_GROW(), CLAY_SIZING_GROW() }});
+
+            CLAY_TEXT(CLAY_STRING("Objects in Scene:"), CLAY_TEXT_CONFIG({
+                .fontSize = 30,
+                .textColor = {255, 255, 255, 255},
+            }));
+
+            Clay_TextElementConfig *text_config = CLAY_TEXT_CONFIG({
+                .fontSize = 25,
+                .textColor = {255, 255, 255, 255},
+            });
+
+            da_foreach(Object, object, &g->objects) {
+                CLAY({
+                    .layout.sizing = { CLAY_SIZING_GROW(), CLAY_SIZING_FIT() },
+                    .layout.layoutDirection = CLAY_LEFT_TO_RIGHT,
+                }) {
+                    Clay_String name = {
+                        .chars = object->name,
+                        .length = object->name_len,
+                        .isStaticallyAllocated = false,
+                    };
+                    CLAY_TEXT(name, text_config);
+
+                    CLAY({ .layout.sizing = { CLAY_SIZING_GROW(), CLAY_SIZING_GROW() } });
+
+                    if (button((Clay_ElementId) {0}, CLAY_STRING("Remove")).pressed) {
+                        size_t i = object - g->objects.items;
+                        memmove(object, object + 1, g->objects.count - i - 1);
+                        g->objects.count -= 1;
+                    }
+                }
+            }
         }
         CLAY({
             .id = CLAY_ID("MainArea"),
@@ -318,4 +371,6 @@ void game_update(void) {
             }
         }
     }
+
+    temp_rewind(temp_checkpoint);
 }
