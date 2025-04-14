@@ -348,7 +348,7 @@ void game_update(void) {
 
             CLAY({
                 .id = CLAY_ID("ObjectList"),
-                .layout.sizing = { CLAY_SIZING_GROW(), CLAY_SIZING_GROW() },
+                .layout.sizing = { CLAY_SIZING_GROW(), CLAY_SIZING_FIT() },
                 .layout.layoutDirection = CLAY_TOP_TO_BOTTOM,
                 .scroll.vertical = true,
             }) {
