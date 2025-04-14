@@ -30,6 +30,7 @@ Clay_String clay_string_from_cstr(const char *cstr) {
 #define ScissorMode(x, y, w, h) BEGIN_END(BeginScissorMode(x, y, w, h), EndScissorMode())
 #define ScissorModeRec(rec) ScissorMode((rec).x, (rec).y, (rec).width, (rec).height)
 #define TextureMode(texture) BEGIN_END(BeginTextureMode(texture), EndTextureMode())
+#define ShaderMode(shader) BEGIN_END(BeginShaderMode(shader), EndShaderMode())
 
 #define MOUSE_BUTTON_PAN MOUSE_BUTTON_RIGHT
 #define MOUSE_BUTTON_MOVE_OBJECT MOUSE_BUTTON_LEFT
@@ -50,6 +51,7 @@ typedef struct {
     size_t name_len;
     union {
         Texture as_texture;
+        Color as_rect_color;
     };
 } Object;
 
@@ -87,7 +89,15 @@ struct Game {
 
     Clay_Context *clay;
     Font font;
-
+    Tool tool;
+    Vector2 rect_start;
+    Color current_color;
+    bool color_picker_open;
+    Texture one_by_one_texture;
+    Shader color_picker_shader;
+    Shader hue_picker_shader;
+    float curr_hue;
+    Vector2 color_picker_pos;
     Objects objects;
     Camera2D camera;
 
@@ -95,9 +105,6 @@ struct Game {
     // cursor ourselves to avoid calling it too much. Raylib already keeps track of this but it doesn't use it for some reason
     // Should probably submit a PR to raylib
     MouseCursor prev_mouse_cursor;
-
-    Tool tool;
-    Vector2 rect_start;
 };
 
 Game *g;
@@ -105,6 +112,24 @@ Game *g;
 void handle_clay_error(Clay_ErrorData error) {
     nob_log(ERROR, "Clay Error: %.*s", error.errorText.length, error.errorText.chars);
 }
+
+// https://gist.github.com/983/e170a24ae8eba2cd174f
+#define RGB_TO_HSV_IN_GLSL  \
+    "vec3 rgb2hsv(vec3 c) {\n" \
+    "    vec4 K = vec4(0.0, -1.0 / 3.0, 2.0 / 3.0, -1.0);\n" \
+    "    vec4 p = mix(vec4(c.bg, K.wz), vec4(c.gb, K.xy), step(c.b, c.g));\n" \
+    "    vec4 q = mix(vec4(p.xyw, c.r), vec4(c.r, p.yzx), step(p.x, c.r));\n" \
+    "\n" \
+    "    float d = q.x - min(q.w, q.y);\n" \
+    "    float e = 1.0e-10;\n" \
+    "    return vec3(abs(q.z + (q.w - q.y) / (6.0 * d + e)), d / (q.x + e), q.x);\n" \
+    "}\n" \
+    "\n" \
+    "vec3 hsv2rgb(vec3 c) {\n" \
+    "    vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);\n" \
+    "    vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);\n" \
+    "    return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);\n" \
+    "}\n"
 
 void game_init(void) {
     g = malloc(sizeof(*g));
@@ -120,11 +145,50 @@ void game_init(void) {
     g->font = LoadFont("./fonts/Alegreya-Regular.ttf");
     g->clay = Clay_Initialize(clay_arena, (Clay_Dimensions) { GetScreenWidth(), GetScreenHeight() }, (Clay_ErrorHandler) { handle_clay_error, 0 });
     Clay_SetMeasureTextFunction(Raylib_MeasureText, &g->font);
+
+    g->current_color = WHITE;
+
+    Image one_by_one_image = GenImageColor(1, 1, WHITE);
+    g->one_by_one_texture = LoadTextureFromImage(one_by_one_image);
+    UnloadImage(one_by_one_image);
+
+    g->hue_picker_shader = LoadShaderFromMemory(NULL,
+"#version 330\n"
+RGB_TO_HSV_IN_GLSL
+"in vec2 fragTexCoord;\n"
+"in vec4 fragColor;\n"
+
+"out vec4 finalColor;\n"
+
+"void main() {\n"
+"    float hue = fragTexCoord.x;\n"
+"    vec3 rgb = hsv2rgb(vec3(hue, 1.0, 1.0));\n"
+"    finalColor = vec4(rgb, 1.0);\n"
+"}\n"
+"\n");
+    g->color_picker_shader = LoadShaderFromMemory(NULL,
+"#version 330\n"
+RGB_TO_HSV_IN_GLSL
+"in vec2 fragTexCoord;\n"
+"in vec4 fragColor;\n"
+
+"uniform float hue;\n"
+
+"out vec4 finalColor;\n"
+
+"void main() {\n"
+"    vec3 rgb = hsv2rgb(vec3(hue, fragTexCoord.x, 1-fragTexCoord.y));\n"
+"    finalColor = vec4(rgb, 1.0);\n"
+"}\n"
+"\n");
 }
 
 Game* game_pre_reload(void) {
+    UnloadShader(g->hue_picker_shader);
+    UnloadShader(g->color_picker_shader);
     return g;
 }
+
 void game_post_reload(Game *new_g) {
     g = new_g;
 
@@ -265,6 +329,7 @@ void update_main_area(void) {
             Object object = {
                 .type = OBJ_RECT,
                 .rec = get_current_rect(),
+                .as_rect_color = g->current_color,
             };
             object_set_name(&object, sv_from_cstr(temp_sprintf("Rectangle (%.0fx%.0f)", object.rec.width, object.rec.height)));
             da_append(&g->objects, object);
@@ -289,6 +354,16 @@ void game_update(void) {
     CustomLayoutElement get_bounding_box = {
         .type = CUSTOM_LAYOUT_ELEMENT_TYPE_GET_BOUNDING_BOX,
         .customData.boundingBoxPtr = &main_area,
+    };
+    Rectangle color_picker;
+    CustomLayoutElement get_color_picker = {
+        .type = CUSTOM_LAYOUT_ELEMENT_TYPE_GET_BOUNDING_BOX,
+        .customData.boundingBoxPtr = &color_picker,
+    };
+    Rectangle hue_picker;
+    CustomLayoutElement get_hue_picker = {
+        .type = CUSTOM_LAYOUT_ELEMENT_TYPE_GET_BOUNDING_BOX,
+        .customData.boundingBoxPtr = &hue_picker,
     };
 
     Clay_BeginLayout();
@@ -332,6 +407,39 @@ void game_update(void) {
                 path_sv = sv_from_parts(path_sv.data + i, path_sv.count - i);
                 object_set_name(&object, path_sv);
                 da_append(&g->objects, object);
+            }
+
+            CLAY({
+                .id = CLAY_ID("ColorPickerLabelContainer"),
+                .layout.sizing = { CLAY_SIZING_GROW(), CLAY_SIZING_FIT() },
+                .layout.layoutDirection = CLAY_LEFT_TO_RIGHT,
+            }) {
+                CLAY_TEXT(CLAY_STRING("Pick Color:"), CLAY_TEXT_CONFIG({
+                    .fontSize = 30,
+                    .textColor = {255, 255, 255, 255},
+                }));
+                CLAY({
+                    .id = CLAY_ID("ColorDisplay"),
+                    .layout.sizing = { CLAY_SIZING_FIXED(30), CLAY_SIZING_FIXED(30) },
+                    .backgroundColor = {g->current_color.r, g->current_color.g, g->current_color.b, g->current_color.a},
+                    .cornerRadius = CLAY_CORNER_RADIUS(10),
+                }) {
+                    if (Clay_Hovered() && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+                        g->color_picker_open = !g->color_picker_open;
+                    }
+                }
+            }
+            if (g->color_picker_open) {
+                CLAY({
+                    .id = CLAY_ID("HuePicker"),
+                    .layout.sizing = {CLAY_SIZING_FIXED(128), CLAY_SIZING_FIXED(30)},
+                    .custom = { &get_hue_picker },
+                });
+                CLAY({
+                    .id = CLAY_ID("ColorPicker"),
+                    .layout.sizing = {CLAY_SIZING_FIXED(128), CLAY_SIZING_FIXED(128)},
+                    .custom = { &get_color_picker },
+                });
             }
 
             CLAY({ .layout.sizing = { CLAY_SIZING_GROW(), CLAY_SIZING_GROW() }});
@@ -404,15 +512,47 @@ void game_update(void) {
                         DrawTexturePro(texture, source, object->rec, Vector2Zero(), 0.0f, WHITE);
                     } break;
                     case OBJ_RECT: {
-                        DrawRectangleRec(object->rec, RED);
+                        DrawRectangleRec(object->rec, object->as_rect_color);
                     } break;
                     default: UNREACHABLE("invalid object type: you have a memory corruption somewhere. good luck");
                 }
             }
 
             if (g->tool == TOOL_RECT && CheckCollisionPointRec(GetMousePosition(), main_area) && IsMouseButtonDown(MOUSE_BUTTON_DRAW_RECT)) {
-                DrawRectangleRec(get_current_rect(), RED);
+                DrawRectangleRec(get_current_rect(), g->current_color);
             }
+        }
+
+        if (g->color_picker_open) {
+            Vector2 mouse = GetMousePosition();
+            if (CheckCollisionPointRec(mouse, hue_picker) && IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
+                g->curr_hue = (mouse.x - hue_picker.x) / hue_picker.width;
+            }
+
+            ShaderMode(g->hue_picker_shader) {
+                DrawTexturePro(g->one_by_one_texture, (Rectangle) {0, 0, 1, 1}, hue_picker, Vector2Zero(), 0, WHITE);
+            }
+            int x = hue_picker.x + g->curr_hue*hue_picker.width;
+            DrawLine(x, hue_picker.y, x, hue_picker.y + hue_picker.height, WHITE);
+
+            int loc = GetShaderLocation(g->color_picker_shader, "hue");
+            SetShaderValue(g->color_picker_shader, loc, &g->curr_hue, SHADER_UNIFORM_FLOAT);
+            ShaderMode(g->color_picker_shader) {
+                DrawTexturePro(g->one_by_one_texture, (Rectangle) {0, 0, 1, 1}, color_picker, Vector2Zero(), 0, WHITE);
+            }
+
+            Vector2 corner = { color_picker.x, color_picker.y };
+            Vector2 actual_pos = Vector2Add(corner, g->color_picker_pos);
+            float radius = 10;
+
+            if (CheckCollisionPointRec(mouse, color_picker) && IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
+                g->color_picker_pos = Vector2Subtract(mouse, corner);
+            }
+            ScissorModeRec(color_picker) {
+                DrawCircleLinesV(actual_pos, radius, WHITE);
+            }
+
+            g->current_color = ColorFromHSV(g->curr_hue * 360, g->color_picker_pos.x / color_picker.width, 1 - g->color_picker_pos.y / color_picker.height);
         }
     }
 
