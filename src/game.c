@@ -8,6 +8,11 @@
 #define NOB_STRIP_PREFIX
 #include "nob.h"
 
+#define CLAY_IMPLEMENTATION
+#include "clay.h"
+
+#include "clay_renderer_raylib.c"
+
 #include "raylib.h"
 #include "raymath.h"
 #define MACRO_VAR(name) _##name##__LINE__

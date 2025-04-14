@@ -48,6 +48,7 @@ void usage(FILE *stream, const char *program_name) {
 
 void common_cflags(Cmd *cmd) {
     cmd_append(cmd, "-Wall", "-Wextra", "-g");
+    cmd_append(cmd, "-I.", "-I./raylib/", "-I./clay/");
 }
 
 int main(int argc, char **argv) {
@@ -105,7 +106,6 @@ int main(int argc, char **argv) {
             common_cflags(&cmd);
             cmd_append(&cmd, "-o", "./build/main");
             cmd_append(&cmd, "./src/main.c", "./src/game.c");
-            cmd_append(&cmd, "-I.", "-I./raylib/");
             cmd_append(&cmd, "./raylib/libraylib.a", "-lm");
             break;
         case TARGET_LINUX_HOTRELOAD:
@@ -117,7 +117,6 @@ int main(int argc, char **argv) {
             common_cflags(&cmd);
             cmd_append(&cmd, "-o", "./build/main");
             cmd_append(&cmd, "./src/main.c");
-            cmd_append(&cmd, "-I.", "-I./raylib/");
             cmd_append(&cmd, "-L./raylib/", "-l:libraylib.so.550", "-lm");
             cmd_append(&cmd, "-DHOTRELOAD");
             if (!nob_cmd_run_sync_and_reset(&cmd)) return 1;
@@ -127,7 +126,6 @@ int main(int argc, char **argv) {
             cmd_append(&cmd, "-shared", "-fPIC");
             cmd_append(&cmd, "-o", "./build/libgame.so");
             cmd_append(&cmd, "./src/game.c");
-            cmd_append(&cmd, "-I.", "-I./raylib/");
             cmd_append(&cmd, "-L./raylib/", "-l:libraylib.so.550", "-lm");
             cmd_append(&cmd, "-DHOTRELOAD");
 #endif // _WIN32
@@ -137,7 +135,6 @@ int main(int argc, char **argv) {
             common_cflags(&cmd);
             cmd_append(&cmd, "-o", "./build/main.exe");
             cmd_append(&cmd, "./src/main.c", "./src/game.c");
-            cmd_append(&cmd, "-I.", "-I./raylib/");
             cmd_append(&cmd, "-L./raylib/", "-lraylib.win", "-lm");
             cmd_append(&cmd, "-lwinmm", "-lgdi32");
             break;
@@ -146,7 +143,6 @@ int main(int argc, char **argv) {
             common_cflags(&cmd);
             cmd_append(&cmd, "-o", "./build/index.html");
             cmd_append(&cmd, "./src/main.c", "./src/game.c");
-            cmd_append(&cmd, "-I.", "-I./raylib/");
             cmd_append(&cmd, "./raylib/libraylib.web.a");
             cmd_append(&cmd, "-s", "USE_GLFW=3", "-DPLATFORM_WEB", "--shell-file", "raylib/minshell.html");
             break;
