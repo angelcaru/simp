@@ -132,7 +132,7 @@ int main(int argc, char **argv) {
             cmd_append(&cmd, "-o", "./build/main.exe");
             cmd_append(&cmd, "./src/main.c", "./src/game.c", "./tinyfiledialogs/tinyfiledialogs.c");
             cmd_append(&cmd, "-L./raylib/", "-lraylib.win", "-lm");
-            cmd_append(&cmd, "-lwinmm", "-lgdi32");
+            cmd_append(&cmd, "-lwinmm", "-lgdi32", "-lcomdlg32", "-lole32");
             break;
         default:
             UNREACHABLE("invalid target");

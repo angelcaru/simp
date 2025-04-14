@@ -1,5 +1,4 @@
 #include "game.h"
-#include "tinyfiledialogs/tinyfiledialogs.h"
 
 #include <string.h>
 #include <unistd.h>
