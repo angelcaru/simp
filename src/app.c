@@ -449,6 +449,70 @@ void app_update(void) {
             .layout.padding = CLAY_PADDING_ALL(10),
             .backgroundColor = {50, 50, 50, 255},
         }) {
+            CLAY({
+                .id = CLAY_ID("FileOptions"),
+                .layout.layoutDirection = CLAY_LEFT_TO_RIGHT,
+                .layout.childGap = 5,
+            }) {
+                if (button(CLAY_ID("OpenImageButton"), CLAY_STRING("Open Image")).pressed) {
+                    const char *filter_patterns[] = { "*.png", "*.jpg", "*.tga", "*.bmp", "*.psd", "*.gif", "*.hdr", "*.pic", "*.ppm" };
+                    const char *path = tinyfd_openFileDialog("Add Image", NULL, ARRAY_LEN(filter_patterns), filter_patterns, "Image", 0);
+                    if (path != NULL) {
+                        da_foreach(Object, object, &g->objects) {
+                            object_unload(object);
+                        }
+                        g->objects.count = 0;
+                        Texture texture = LoadTexture(path);
+                        Object object = {
+                            .as_texture = texture,
+                            .rec = { 0, 0, texture.width, texture.height },
+                        };
+                        String_View path_sv = sv_from_cstr(path);
+                        assert(path_sv.count > 0);
+                        int i;
+                        for (i = path_sv.count - 1; i >= 0; i--) {
+                            if (
+                                path_sv.data[i] == '/'
+                                #ifdef _WIN32
+                                || path_sv.data[i] == '\\'
+                                #endif
+                            ) {
+                                i++;
+                                break;
+                            }
+                        }
+                        path_sv = sv_from_parts(path_sv.data + i, path_sv.count - i);
+                        object_set_name(&object, path_sv);
+                        da_append(&g->objects, object);
+                        g->canvas_bounds = object.rec;
+                    }
+                }
+                if (button(CLAY_ID("ExportButton"), CLAY_STRING("Export Image")).pressed) {
+                    const char *filter_patterns[] = {"*.png", "*.bmp", "*.tga", "*.jpg", "*.hdr"};
+                    const char *path = tinyfd_saveFileDialog("Export Image", NULL, ARRAY_LEN(filter_patterns), filter_patterns, "Image file");
+                    if (path != NULL) {
+                        Camera2D camera = {
+                            .zoom = 1.0f,
+                            .offset = {g->canvas_bounds.x, g->canvas_bounds.y},
+                        };
+
+                        RenderTexture rtex = LoadRenderTexture(g->canvas_bounds.width, g->canvas_bounds.height);
+                        Mode2D(camera) TextureMode(rtex) {
+                            draw_scene();
+                        }
+
+                        Image img = LoadImageFromTexture(rtex.texture);
+                        ImageFlipVertical(&img);
+                        if (!ExportImage(img, path)) {
+                            tinyfd_messageBox("Error exporting image", temp_sprintf("Could not export image to %s", path), "ok", "error", 1);
+                        }
+                        UnloadImage(img);
+
+                        UnloadRenderTexture(rtex);
+                    }
+                }
+            }
+
             tool_button(CLAY_ID("MoveButton"), CLAY_STRING("Move"), TOOL_MOVE);
             tool_button(CLAY_ID("RectangleButton"), CLAY_STRING("Rectangle"), TOOL_RECT);
             if (button(CLAY_ID("AddImageButton"), CLAY_STRING("Add Image")).pressed) {
@@ -477,30 +541,6 @@ void app_update(void) {
                     path_sv = sv_from_parts(path_sv.data + i, path_sv.count - i);
                     object_set_name(&object, path_sv);
                     da_append(&g->objects, object);
-                }
-            }
-            if (button(CLAY_ID("ExportButton"), CLAY_STRING("Export Image")).pressed) {
-                const char *filter_patterns[] = {"*.png", "*.bmp", "*.tga", "*.jpg", "*.hdr"};
-                const char *path = tinyfd_saveFileDialog("Export Image", NULL, ARRAY_LEN(filter_patterns), filter_patterns, "Image file");
-                if (path != NULL) {
-                    Camera2D camera = {
-                        .zoom = 1.0f,
-                        .offset = {g->canvas_bounds.x, g->canvas_bounds.y},
-                    };
-
-                    RenderTexture rtex = LoadRenderTexture(g->canvas_bounds.width, g->canvas_bounds.height);
-                    Mode2D(camera) TextureMode(rtex) {
-                        draw_scene();
-                    }
-
-                    Image img = LoadImageFromTexture(rtex.texture);
-                    ImageFlipVertical(&img);
-                    if (!ExportImage(img, path)) {
-                        tinyfd_messageBox("Error exporting image", temp_sprintf("Could not export image to %s", path), "ok", "error", 1);
-                    }
-                    UnloadImage(img);
-
-                    UnloadRenderTexture(rtex);
                 }
             }
 
