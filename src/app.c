@@ -584,10 +584,10 @@ void app_update(void) {
                                 *(object - 1) = tmp;
                             }
                             if (button((Clay_ElementId) {0}, CLAY_STRING("Remove")).pressed) {
-                                object_unload(object);
-
                                 size_t i = object - g->objects.items;
-                                memmove(object, object + 1, g->objects.count - i - 1);
+                                object_unload(object);
+                                nob_log(INFO, "Removing object %zu (%.*s)", i, (int)object->name_len, object->name);
+                                memmove(object, object + 1, (g->objects.count - i - 1) * sizeof(*object));
                                 g->objects.count -= 1;
                             }
                         }
