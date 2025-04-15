@@ -434,28 +434,30 @@ void app_update(void) {
             if (button(CLAY_ID("AddImageButton"), CLAY_STRING("Add Image")).pressed) {
                 const char *filter_patterns[] = { "*.png", "*.jpg", "*.tga", "*.bmp", "*.psd", "*.gif", "*.hdr", "*.pic", "*.ppm" };
                 const char *path = tinyfd_openFileDialog("Add Image", NULL, ARRAY_LEN(filter_patterns), filter_patterns, "Image", 0);
-                Texture texture = LoadTexture(path);
-                Object object = {
-                    .as_texture = texture,
-                    .rec = { 0, 0, texture.width, texture.height },
-                };
-                String_View path_sv = sv_from_cstr(path);
-                assert(path_sv.count > 0);
-                int i;
-                for (i = path_sv.count - 1; i >= 0; i--) {
-                    if (
-                        path_sv.data[i] == '/'
-                    #ifdef _WIN32
-                        || path_sv.data[i] == '\\'
-                    #endif
-                    ) {
-                        i++;
-                        break;
+                if (path != NULL) {
+                    Texture texture = LoadTexture(path);
+                    Object object = {
+                        .as_texture = texture,
+                        .rec = { 0, 0, texture.width, texture.height },
+                    };
+                    String_View path_sv = sv_from_cstr(path);
+                    assert(path_sv.count > 0);
+                    int i;
+                    for (i = path_sv.count - 1; i >= 0; i--) {
+                        if (
+                            path_sv.data[i] == '/'
+                            #ifdef _WIN32
+                            || path_sv.data[i] == '\\'
+                            #endif
+                        ) {
+                            i++;
+                            break;
+                        }
                     }
+                    path_sv = sv_from_parts(path_sv.data + i, path_sv.count - i);
+                    object_set_name(&object, path_sv);
+                    da_append(&g->objects, object);
                 }
-                path_sv = sv_from_parts(path_sv.data + i, path_sv.count - i);
-                object_set_name(&object, path_sv);
-                da_append(&g->objects, object);
             }
 
             CLAY({
