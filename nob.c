@@ -26,21 +26,26 @@ Target default_target = TARGET_WINDOWS;
 Target default_target = TARGET_LINUX;
 #endif
 
+void list_targets(FILE *stream) {
+    for (Target target = 0; target < COUNT_TARGETS; target++) {
+        fprintf(stream, "      %s", target_as_cstr(target));
+        if (target == default_target) {
+            fprintf(stream, " (default)");
+        }
+        fprintf(stream, "\n");
+    }
+}
+
 void usage(FILE *stream, const char *program_name) {
     fprintf(stream, "Usage: %s [OPTIONS]\n", program_name);
-    fprintf(stream, "    OPTIONS:\n");
-    fprintf(stream, "      -h, --help - Print this help message\n");
-    fprintf(stream, "      -r - Run app after building\n");
+    fprintf(stream, "  OPTIONS:\n");
+    fprintf(stream, "    -h, --help - Print this help message\n");
+    fprintf(stream, "    -r - Run app after building\n");
     static_assert(COUNT_TARGETS == 3, "Please update usage after adding a new target");
-    fprintf(stream, "      -t <target> - Build for a specific target. Possible targets include:\n");
-    fprintf(stream, "        linux\n");
-#ifdef _WIN32
-    fprintf(stream, "        linux-hotreload (not available on Windows)\n");
-#else
-    fprintf(stream, "        linux-hotreload (can be abbreviated to `lh`)\n");
-#endif // _WIN32
-    fprintf(stream, "        windows\n");
-    fprintf(stream, "      If this option is not provided, the default target is `%s`\n", target_as_cstr(default_target));
+    fprintf(stream, "    -t <target> - Build for a specific target. Possible targets include:\n");
+    list_targets(stream);
+    fprintf(stream, "    -t list - Print the above list of targets and exit\n");
+    fprintf(stream, "    If this option is not provided, the default target is `%s`\n", target_as_cstr(default_target));
 }
 
 void common_cflags(Cmd *cmd) {
@@ -51,8 +56,6 @@ void common_cflags(Cmd *cmd) {
 
 int main(int argc, char **argv) {
     NOB_GO_REBUILD_URSELF(argc, argv);
-
-    if (!mkdir_if_not_exists("./build/")) return 1;
 
     const char *program_name = nob_shift(argv, argc);
 
@@ -76,6 +79,9 @@ int main(int argc, char **argv) {
                 target = TARGET_LINUX_HOTRELOAD;
             } else if (strcmp(target_name, "windows") == 0) {
                 target = TARGET_WINDOWS;
+            } else if (strcmp(target_name, "list") == 0) {
+                list_targets(stdout);
+                return 0;
             } else {
                 usage(stderr, program_name);
                 nob_log(ERROR, "unknown target %s", target_name);
@@ -89,6 +95,8 @@ int main(int argc, char **argv) {
             return 1;
         }
     }
+
+    if (!mkdir_if_not_exists("./build/")) return 1;
 
     Cmd cmd = {0};
     static_assert(COUNT_TARGETS == 3, "Please update this `switch` statement when adding a new target");
