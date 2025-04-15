@@ -104,6 +104,8 @@ struct App {
     // cursor ourselves to avoid calling it too much. Raylib already keeps track of this but it doesn't use it for some reason
     // Should probably submit a PR to raylib
     MouseCursor prev_mouse_cursor;
+
+    Rectangle canvas_bounds;
 };
 
 App *g;
@@ -180,6 +182,8 @@ RGB_TO_HSV_IN_GLSL
 "    finalColor = vec4(rgb, 1.0);\n"
 "}\n"
 "\n");
+
+    g->canvas_bounds = (Rectangle) {0, 0, 1920, 1080};
 }
 
 App* app_pre_reload(void) {
@@ -387,6 +391,22 @@ void update_main_area(void) {
     set_cursor(mouse_cursor);
 }
 
+void draw_scene(void) {
+    da_foreach(Object, object, &g->objects) {
+        switch (object->type) {
+            case OBJ_TEXTURE: {
+                Texture texture = object->as_texture;
+                Rectangle source = { 0, 0, texture.width, texture.height };
+                DrawTexturePro(texture, source, object->rec, Vector2Zero(), 0.0f, WHITE);
+            } break;
+            case OBJ_RECT: {
+                DrawRectangleRec(object->rec, object->as_rect_color);
+            } break;
+            default: UNREACHABLE("invalid object type: you have a memory corruption somewhere. good luck");
+        }
+    }
+}
+
 void app_update(void) {
     size_t temp_checkpoint = temp_save();
 
@@ -457,6 +477,30 @@ void app_update(void) {
                     path_sv = sv_from_parts(path_sv.data + i, path_sv.count - i);
                     object_set_name(&object, path_sv);
                     da_append(&g->objects, object);
+                }
+            }
+            if (button(CLAY_ID("ExportButton"), CLAY_STRING("Export Image")).pressed) {
+                const char *filter_patterns[] = {"*.png", "*.bmp", "*.tga", "*.jpg", "*.hdr"};
+                const char *path = tinyfd_saveFileDialog("Export Image", NULL, ARRAY_LEN(filter_patterns), filter_patterns, "Image file");
+                if (path != NULL) {
+                    Camera2D camera = {
+                        .zoom = 1.0f,
+                        .offset = {g->canvas_bounds.x, g->canvas_bounds.y},
+                    };
+
+                    RenderTexture rtex = LoadRenderTexture(g->canvas_bounds.width, g->canvas_bounds.height);
+                    Mode2D(camera) TextureMode(rtex) {
+                        draw_scene();
+                    }
+
+                    Image img = LoadImageFromTexture(rtex.texture);
+                    ImageFlipVertical(&img);
+                    if (!ExportImage(img, path)) {
+                        tinyfd_messageBox("Error exporting image", temp_sprintf("Could not export image to %s", path), "ok", "error", 1);
+                    }
+                    UnloadImage(img);
+
+                    UnloadRenderTexture(rtex);
                 }
             }
 
@@ -570,23 +614,13 @@ void app_update(void) {
                 set_cursor(MOUSE_CURSOR_DEFAULT);
             }
 
-            da_foreach(Object, object, &g->objects) {
-                switch (object->type) {
-                    case OBJ_TEXTURE: {
-                        Texture texture = object->as_texture;
-                        Rectangle source = { 0, 0, texture.width, texture.height };
-                        DrawTexturePro(texture, source, object->rec, Vector2Zero(), 0.0f, WHITE);
-                    } break;
-                    case OBJ_RECT: {
-                        DrawRectangleRec(object->rec, object->as_rect_color);
-                    } break;
-                    default: UNREACHABLE("invalid object type: you have a memory corruption somewhere. good luck");
-                }
-            }
+            draw_scene();
 
             if (g->tool == TOOL_RECT && CheckCollisionPointRec(GetMousePosition(), main_area) && IsMouseButtonDown(MOUSE_BUTTON_DRAW_RECT)) {
                 DrawRectangleRec(get_current_rect(), g->current_color);
             }
+
+            DrawRectangleLinesEx(g->canvas_bounds, 5, WHITE);
         }
 
         if (g->color_picker_open) {
