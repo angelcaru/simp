@@ -280,7 +280,39 @@ void update_main_area(void) {
                 object_resize_hitbox_size, object->rec.height,
             };
 
-            if (CheckCollisionPointRec(mouse_pos, top_resize_hitbox)) {
+            if (CheckCollisionPointRec(mouse_pos, top_resize_hitbox) && CheckCollisionPointRec(mouse_pos, left_resize_hitbox)) {
+                mouse_cursor = MOUSE_CURSOR_CROSSHAIR;
+
+                if (is_move_down) {
+                    object->rec.y += mouse_delta.y;
+                    object->rec.height -= mouse_delta.y;
+                    object->rec.x += mouse_delta.x;
+                    object->rec.width -= mouse_delta.x;
+                }
+            } else if (CheckCollisionPointRec(mouse_pos, top_resize_hitbox) && CheckCollisionPointRec(mouse_pos, right_resize_hitbox)) {
+                mouse_cursor = MOUSE_CURSOR_CROSSHAIR;
+
+                if (is_move_down) {
+                    object->rec.y += mouse_delta.y;
+                    object->rec.height -= mouse_delta.y;
+                    object->rec.width += mouse_delta.x;
+                }
+            } else if (CheckCollisionPointRec(mouse_pos, bottom_resize_hitbox) && CheckCollisionPointRec(mouse_pos, left_resize_hitbox)) {
+                mouse_cursor = MOUSE_CURSOR_CROSSHAIR;
+
+                if (is_move_down) {
+                    object->rec.height += mouse_delta.y;
+                    object->rec.x += mouse_delta.x;
+                    object->rec.width -= mouse_delta.x;
+                }
+            } else if (CheckCollisionPointRec(mouse_pos, bottom_resize_hitbox) && CheckCollisionPointRec(mouse_pos, right_resize_hitbox)) {
+                mouse_cursor = MOUSE_CURSOR_CROSSHAIR;
+
+                if (is_move_down) {
+                    object->rec.height += mouse_delta.y;
+                    object->rec.width += mouse_delta.x;
+                }
+            } else if (CheckCollisionPointRec(mouse_pos, top_resize_hitbox)) {
                 mouse_cursor = MOUSE_CURSOR_RESIZE_NS;
 
                 if (is_move_down) {
