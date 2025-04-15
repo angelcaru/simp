@@ -80,6 +80,7 @@ typedef struct {
 typedef enum {
     TOOL_MOVE = 0,
     TOOL_RECT,
+    TOOL_CHANGE_CANVAS,
     COUNT_TOOLS,
 } Tool;
 
@@ -387,6 +388,14 @@ void update_main_area(void) {
             object_set_name(&object, sv_from_cstr(temp_sprintf("Rectangle (#%02hhx%02hhx%02hhx)", g->current_color.r, g->current_color.g, g->current_color.b)));
             da_append(&g->objects, object);
         }
+    } else if (g->tool == TOOL_CHANGE_CANVAS) {
+        if (IsMouseButtonPressed(MOUSE_BUTTON_DRAW_RECT)) {
+            g->rect_start = mouse_pos;
+        }
+
+        if (IsMouseButtonReleased(MOUSE_BUTTON_DRAW_RECT)) {
+            g->canvas_bounds = get_current_rect();
+        }
     }
     set_cursor(mouse_cursor);
 }
@@ -493,11 +502,11 @@ void app_update(void) {
                     if (path != NULL) {
                         Camera2D camera = {
                             .zoom = 1.0f,
-                            .offset = {g->canvas_bounds.x, g->canvas_bounds.y},
+                            .offset = {-g->canvas_bounds.x, -g->canvas_bounds.y},
                         };
 
                         RenderTexture rtex = LoadRenderTexture(g->canvas_bounds.width, g->canvas_bounds.height);
-                        Mode2D(camera) TextureMode(rtex) {
+                        TextureMode(rtex) Mode2D(camera)  {
                             draw_scene();
                         }
 
@@ -513,6 +522,7 @@ void app_update(void) {
                 }
             }
 
+            tool_button(CLAY_ID("ChangeCanvasButton"), CLAY_STRING("ChangeCanvas"), TOOL_CHANGE_CANVAS);
             tool_button(CLAY_ID("MoveButton"), CLAY_STRING("Move"), TOOL_MOVE);
             tool_button(CLAY_ID("RectangleButton"), CLAY_STRING("Rectangle"), TOOL_RECT);
             if (button(CLAY_ID("AddImageButton"), CLAY_STRING("Add Image")).pressed) {
@@ -658,6 +668,9 @@ void app_update(void) {
 
             if (g->tool == TOOL_RECT && CheckCollisionPointRec(GetMousePosition(), main_area) && IsMouseButtonDown(MOUSE_BUTTON_DRAW_RECT)) {
                 DrawRectangleRec(get_current_rect(), g->current_color);
+            }
+            if (g->tool == TOOL_CHANGE_CANVAS && CheckCollisionPointRec(GetMousePosition(), main_area) && IsMouseButtonDown(MOUSE_BUTTON_DRAW_RECT)) {
+                DrawRectangleLinesEx(get_current_rect(), 5, WHITE);
             }
 
             DrawRectangleLinesEx(g->canvas_bounds, 5, WHITE);
