@@ -328,7 +328,7 @@ void update_main_area(void) {
                 .rec = get_current_rect(),
                 .as_rect_color = g->current_color,
             };
-            object_set_name(&object, sv_from_cstr(temp_sprintf("Rectangle (%.0fx%.0f)", object.rec.width, object.rec.height)));
+            object_set_name(&object, sv_from_cstr(temp_sprintf("Rectangle (#%02hhx%02hhx%02hhx)", g->current_color.r, g->current_color.g, g->current_color.b)));
             da_append(&g->objects, object);
         }
     }
