@@ -1,5 +1,5 @@
-# name-of-your-project
-Description of your project
+# SIMP
+Simple Image Manipulation Program
 
 ## Quick Start
 This project uses the [nob](https://github.com/tsoding/nob.h) build system.

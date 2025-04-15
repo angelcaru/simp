@@ -60,7 +60,7 @@ void set_libapp_to_be_reloaded(int unused_arg_for_sigaction) {
 
 int main(void) {
     SetConfigFlags(FLAG_WINDOW_RESIZABLE);
-    InitWindow(640, 480, "Image Editor");
+    InitWindow(640, 480, "Simple Image Manipulation Program");
 
     if (!load_libapp()) return 1;
 
