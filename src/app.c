@@ -1,4 +1,4 @@
-#include "game.h"
+#include "app.h"
 
 #include <string.h>
 #include <unistd.h>
@@ -83,7 +83,7 @@ typedef enum {
     COUNT_TOOLS,
 } Tool;
 
-struct Game {
+struct App {
     size_t size;
 
     Clay_Context *clay;
@@ -106,7 +106,7 @@ struct Game {
     MouseCursor prev_mouse_cursor;
 };
 
-Game *g;
+App *g;
 
 void handle_clay_error(Clay_ErrorData error) {
     nob_log(ERROR, "Clay Error: %.*s", error.errorText.length, error.errorText.chars);
@@ -130,7 +130,7 @@ void handle_clay_error(Clay_ErrorData error) {
     "    return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);\n" \
     "}\n"
 
-void game_init(void) {
+void app_init(void) {
     g = malloc(sizeof(*g));
     memset(g, 0, sizeof(*g));
     g->size = sizeof(*g);
@@ -182,17 +182,15 @@ RGB_TO_HSV_IN_GLSL
 "\n");
 }
 
-Game* game_pre_reload(void) {
-    UnloadShader(g->hue_picker_shader);
-    UnloadShader(g->color_picker_shader);
+App* app_pre_reload(void) {
     return g;
 }
 
-void game_post_reload(Game *new_g) {
+void app_post_reload(App *new_g) {
     g = new_g;
 
     if (g->size < sizeof(*g)) {
-        nob_log(INFO, "Migrating struct Game (%zu bytes -> %zu bytes)", g->size, sizeof(*g));
+        nob_log(INFO, "Migrating struct App (%zu bytes -> %zu bytes)", g->size, sizeof(*g));
         g = realloc(g, sizeof(*g));
         memset((char*)g + g->size, 0, sizeof(*g) - g->size);
         g->size = sizeof(*g);
@@ -337,7 +335,7 @@ void update_main_area(void) {
     set_cursor(mouse_cursor);
 }
 
-void game_update(void) {
+void app_update(void) {
     size_t temp_checkpoint = temp_save();
 
     Clay_SetLayoutDimensions((Clay_Dimensions) { GetScreenWidth(), GetScreenHeight() });

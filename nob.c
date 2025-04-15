@@ -30,7 +30,7 @@ void usage(FILE *stream, const char *program_name) {
     fprintf(stream, "Usage: %s [OPTIONS]\n", program_name);
     fprintf(stream, "    OPTIONS:\n");
     fprintf(stream, "      -h, --help - Print this help message\n");
-    fprintf(stream, "      -r - Run game after building\n");
+    fprintf(stream, "      -r - Run app after building\n");
     static_assert(COUNT_TARGETS == 3, "Please update usage after adding a new target");
     fprintf(stream, "      -t <target> - Build for a specific target. Possible targets include:\n");
     fprintf(stream, "        linux\n");
@@ -101,7 +101,7 @@ int main(int argc, char **argv) {
 #endif
             common_cflags(&cmd);
             cmd_append(&cmd, "-o", "./build/main");
-            cmd_append(&cmd, "./src/main.c", "./src/game.c", "./tinyfiledialogs/tinyfiledialogs.c");
+            cmd_append(&cmd, "./src/main.c", "./src/app.c", "./tinyfiledialogs/tinyfiledialogs.c");
             cmd_append(&cmd, "./raylib/libraylib.a", "-lm");
             break;
         case TARGET_LINUX_HOTRELOAD:
@@ -120,8 +120,8 @@ int main(int argc, char **argv) {
             cmd_append(&cmd, "cc");
             common_cflags(&cmd);
             cmd_append(&cmd, "-shared", "-fPIC");
-            cmd_append(&cmd, "-o", "./build/libgame.so");
-            cmd_append(&cmd, "./src/game.c", "./tinyfiledialogs/tinyfiledialogs.c");
+            cmd_append(&cmd, "-o", "./build/libapp.so");
+            cmd_append(&cmd, "./src/app.c", "./tinyfiledialogs/tinyfiledialogs.c");
             cmd_append(&cmd, "-L./raylib/", "-l:libraylib.so.550", "-lm");
             cmd_append(&cmd, "-DHOTRELOAD");
 #endif // _WIN32
@@ -130,7 +130,7 @@ int main(int argc, char **argv) {
             cmd_append(&cmd, "x86_64-w64-mingw32-gcc");
             common_cflags(&cmd);
             cmd_append(&cmd, "-o", "./build/main.exe");
-            cmd_append(&cmd, "./src/main.c", "./src/game.c", "./tinyfiledialogs/tinyfiledialogs.c");
+            cmd_append(&cmd, "./src/main.c", "./src/app.c", "./tinyfiledialogs/tinyfiledialogs.c");
             cmd_append(&cmd, "-L./raylib/", "-lraylib.win", "-lm");
             cmd_append(&cmd, "-lwinmm", "-lgdi32", "-lcomdlg32", "-lole32");
             break;
