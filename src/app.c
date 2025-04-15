@@ -441,42 +441,57 @@ void app_update(void) {
 
             CLAY({ .layout.sizing = { CLAY_SIZING_GROW(), CLAY_SIZING_GROW() }});
 
-            CLAY_TEXT(CLAY_STRING("Objects in Scene:"), CLAY_TEXT_CONFIG({
-                .fontSize = 30,
-                .textColor = {255, 255, 255, 255},
-            }));
+            if (g->objects.count > 0) {
+                CLAY_TEXT(CLAY_STRING("Objects in Scene:"), CLAY_TEXT_CONFIG({
+                    .fontSize = 30,
+                    .textColor = {255, 255, 255, 255},
+                }));
 
-            Clay_TextElementConfig *text_config = CLAY_TEXT_CONFIG({
-                .fontSize = 25,
-                .textColor = {255, 255, 255, 255},
-            });
+                Clay_TextElementConfig *text_config = CLAY_TEXT_CONFIG({
+                    .fontSize = 25,
+                    .textColor = {255, 255, 255, 255},
+                });
 
-            CLAY({
-                .id = CLAY_ID("ObjectList"),
-                .layout.sizing = { CLAY_SIZING_GROW(), CLAY_SIZING_FIT() },
-                .layout.layoutDirection = CLAY_TOP_TO_BOTTOM,
-                .scroll.vertical = true,
-            }) {
-                da_foreach(Object, object, &g->objects) {
-                    CLAY({
-                        .layout.sizing = { CLAY_SIZING_GROW(), CLAY_SIZING_FIT() },
-                        .layout.layoutDirection = CLAY_LEFT_TO_RIGHT,
-                    }) {
-                        Clay_String name = {
-                            .chars = object->name,
-                            .length = object->name_len,
-                            .isStaticallyAllocated = false,
-                        };
-                        CLAY_TEXT(name, text_config);
+                CLAY({
+                    .id = CLAY_ID("ObjectList"),
+                    .layout.sizing = { CLAY_SIZING_GROW(), CLAY_SIZING_FIT() },
+                    .layout.layoutDirection = CLAY_TOP_TO_BOTTOM,
+                    .scroll.vertical = true,
+                }) {
+                    for (Object *object = g->objects.items + g->objects.count - 1; object >= g->objects.items; object--) {
+                        CLAY({
+                            .layout.sizing = { CLAY_SIZING_GROW(), CLAY_SIZING_FIT() },
+                            .layout.childGap = 3,
+                            .layout.layoutDirection = CLAY_LEFT_TO_RIGHT,
+                        }) {
+                            Clay_String name = {
+                                .chars = object->name,
+                                .length = object->name_len,
+                                .isStaticallyAllocated = false,
+                            };
+                            CLAY_TEXT(name, text_config);
 
-                        CLAY({ .layout.sizing = { CLAY_SIZING_GROW(), CLAY_SIZING_GROW() } });
+                            CLAY({ .layout.sizing = { CLAY_SIZING_GROW(), CLAY_SIZING_GROW() } });
 
-                        if (button((Clay_ElementId) {0}, CLAY_STRING("Remove")).pressed) {
-                            object_unload(object);
+                            Button_State up_button = button((Clay_ElementId) {0}, CLAY_STRING("^"));
+                            if (object != g->objects.items + g->objects.count - 1 && up_button.pressed) {
+                                Object tmp = *object;
+                                *object = *(object + 1);
+                                *(object + 1) = tmp;
+                            }
+                            Button_State down_button = button((Clay_ElementId) {0}, CLAY_STRING("v"));
+                            if (object != g->objects.items && down_button.pressed) {
+                                Object tmp = *object;
+                                *object = *(object - 1);
+                                *(object - 1) = tmp;
+                            }
+                            if (button((Clay_ElementId) {0}, CLAY_STRING("Remove")).pressed) {
+                                object_unload(object);
 
-                            size_t i = object - g->objects.items;
-                            memmove(object, object + 1, g->objects.count - i - 1);
-                            g->objects.count -= 1;
+                                size_t i = object - g->objects.items;
+                                memmove(object, object + 1, g->objects.count - i - 1);
+                                g->objects.count -= 1;
+                            }
                         }
                     }
                 }
