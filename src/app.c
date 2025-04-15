@@ -229,6 +229,26 @@ Button_State button(Clay_ElementId id, Clay_String text) {
     return state;
 }
 
+Button_State tool_button(Clay_ElementId id, Clay_String text, Tool tool) {
+    Button_State state;
+    CLAY({
+        .id = id,
+        .layout.padding = { .left = 5, .right = 5 },
+        .backgroundColor = (state.hovered = Clay_Hovered()) || g->tool == tool ? (Clay_Color) { 150, 150, 150, 255 } : (Clay_Color){ 100, 100, 100, 255 },
+        .cornerRadius = CLAY_CORNER_RADIUS(5),
+    }) {
+        state.pressed = state.hovered && IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
+        uint16_t font_size = 30;
+        Clay_TextElementConfig *config = CLAY_TEXT_CONFIG({
+            .fontSize = font_size,
+            .textColor = {255, 255, 255, 255},
+        });
+        CLAY_TEXT(text, config);
+    }
+    if (state.pressed) g->tool = tool;
+    return state;
+}
+
 Rectangle get_current_rect(void) {
     Vector2 start = g->rect_start;
     Vector2 end = GetScreenToWorld2D(GetMousePosition(), g->camera);
@@ -409,8 +429,8 @@ void app_update(void) {
             .layout.padding = CLAY_PADDING_ALL(10),
             .backgroundColor = {50, 50, 50, 255},
         }) {
-            if (button(CLAY_ID("MoveButton"), CLAY_STRING("Move")).pressed) g->tool = TOOL_MOVE;
-            if (button(CLAY_ID("RectangleButton"), CLAY_STRING("Rectangle")).pressed) g->tool = TOOL_RECT;
+            tool_button(CLAY_ID("MoveButton"), CLAY_STRING("Move"), TOOL_MOVE);
+            tool_button(CLAY_ID("RectangleButton"), CLAY_STRING("Rectangle"), TOOL_RECT);
             if (button(CLAY_ID("AddImageButton"), CLAY_STRING("Add Image")).pressed) {
                 const char *filter_patterns[] = { "*.png", "*.jpg", "*.tga", "*.bmp", "*.psd", "*.gif", "*.hdr", "*.pic", "*.ppm" };
                 const char *path = tinyfd_openFileDialog("Add Image", NULL, ARRAY_LEN(filter_patterns), filter_patterns, "Image", 0);
