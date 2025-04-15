@@ -658,3 +658,5 @@ void app_update(void) {
 
     temp_rewind(temp_checkpoint);
 }
+
+// TODO: round the sizes of the objects to the nearest integer pixel (to better reflect how they'll look exported)
