@@ -186,7 +186,7 @@ RGB_TO_HSV_IN_GLSL
     g->canvas_bounds = (Rectangle) {0, 0, 1920, 1080};
 }
 
-App* app_pre_reload(void) {
+App *app_pre_reload(void) {
     return g;
 }
 
