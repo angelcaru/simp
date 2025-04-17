@@ -36,6 +36,7 @@ Clay_String clay_string_from_cstr(const char *cstr) {
 #define MOUSE_BUTTON_DRAW_RECT MOUSE_BUTTON_LEFT
 
 #define OBJECT_RESIZE_HITBOX_SIZE 30
+#define HOVERED_OBJECT_OUTLINE_THICKNESS 5
 
 typedef enum {
     OBJ_TEXTURE,
@@ -107,6 +108,7 @@ struct App {
     MouseCursor prev_mouse_cursor;
 
     Rectangle canvas_bounds;
+    int selected_object;
 };
 
 App *g;
@@ -185,6 +187,7 @@ RGB_TO_HSV_IN_GLSL
 "\n");
 
     g->canvas_bounds = (Rectangle) {0, 0, 1920, 1080};
+    g->selected_object = -1;
 }
 
 App *app_pre_reload(void) {
@@ -597,12 +600,14 @@ void app_update(void) {
                     .layout.layoutDirection = CLAY_TOP_TO_BOTTOM,
                     .scroll.vertical = true,
                 }) {
+                    g->selected_object = -1;
                     for (Object *object = g->objects.items + g->objects.count - 1; object >= g->objects.items; object--) {
                         CLAY({
                             .layout.sizing = { CLAY_SIZING_GROW(), CLAY_SIZING_FIT() },
                             .layout.childGap = 3,
                             .layout.layoutDirection = CLAY_LEFT_TO_RIGHT,
                         }) {
+                            if (Clay_Hovered()) g->selected_object = object - g->objects.items;
                             Clay_String name = {
                                 .chars = object->name,
                                 .length = object->name_len,
@@ -662,6 +667,11 @@ void app_update(void) {
             }
             if (g->tool == TOOL_CHANGE_CANVAS && CheckCollisionPointRec(GetMousePosition(), main_area) && IsMouseButtonDown(MOUSE_BUTTON_DRAW_RECT)) {
                 DrawRectangleLinesEx(get_current_rect(), 5, WHITE);
+            }
+
+            if (g->selected_object != -1) {
+                Rectangle rec = g->objects.items[g->selected_object].rec;
+                DrawRectangleLinesEx(rec, HOVERED_OBJECT_OUTLINE_THICKNESS / g->camera.zoom, WHITE);
             }
 
             DrawRectangleLinesEx(g->canvas_bounds, 5, WHITE);
