@@ -509,19 +509,27 @@ void app_update(void) {
                             .offset = {-g->canvas_bounds.x, -g->canvas_bounds.y},
                         };
 
-                        RenderTexture rtex = LoadRenderTexture(g->canvas_bounds.width, g->canvas_bounds.height);
-                        TextureMode(rtex) Mode2D(camera)  {
+                        int width = g->canvas_bounds.width;
+                        int height = g->canvas_bounds.height;
+
+                        RenderTexture rtex_flipped = LoadRenderTexture(width, height);
+                        TextureMode(rtex_flipped) Mode2D(camera)  {
                             draw_scene();
                         }
+                        RenderTexture rtex_nflipped = LoadRenderTexture(width, height);
+                        // flip texture
+                        TextureMode(rtex_nflipped) {
+                            DrawTexture(rtex_flipped.texture, 0, 0, WHITE);
+                        }
 
-                        Image img = LoadImageFromTexture(rtex.texture);
-                        ImageFlipVertical(&img);
+                        Image img = LoadImageFromTexture(rtex_nflipped.texture);
                         if (!ExportImage(img, path)) {
                             tinyfd_messageBox("Error exporting image", temp_sprintf("Could not export image to %s", path), "ok", "error", 1);
                         }
                         UnloadImage(img);
 
-                        UnloadRenderTexture(rtex);
+                        UnloadRenderTexture(rtex_flipped);
+                        UnloadRenderTexture(rtex_nflipped);
                     }
                 }
             }
