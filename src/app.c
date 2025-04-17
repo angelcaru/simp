@@ -41,6 +41,7 @@ Clay_String clay_string_from_cstr(const char *cstr) {
 typedef enum {
     OBJ_TEXTURE,
     OBJ_RECT,
+    COUNT_OBJS,
 } Object_Type;
 
 #define OBJ_NAME_MAX 128
@@ -61,12 +62,14 @@ typedef struct {
 } Object;
 
 void object_unload(Object *object) {
+    static_assert(COUNT_OBJS == 2, "Exhaustive handling of object types in object_unload");
     switch (object->type) {
         case OBJ_TEXTURE:
             UnloadTexture(object->as_texture.texture);
             break;
         case OBJ_RECT:
             break;
+        case COUNT_OBJS:
         default: UNREACHABLE("invalid object type: you have a memory corruption somewhere. good luck");
     }
 }
@@ -79,17 +82,21 @@ void object_set_name(Object *object, String_View name) {
 }
 
 Rectangle object_get_bounding_box(const Object *object) {
+    static_assert(COUNT_OBJS == 2, "Exhaustive handling of object types in object_get_bounding_box");
     switch (object->type) {
         case OBJ_RECT: return object->as_rect.rec;
         case OBJ_TEXTURE: return object->as_texture.rec;
+        case COUNT_OBJS:
         default: UNREACHABLE("invalid object type: you have a memory corruption somewhere. good luck");
     }
 }
 
 void object_set_bounding_box(Object *object, Rectangle bounding_box) {
+    static_assert(COUNT_OBJS == 2, "Exhaustive handling of object types in object_set_bounding_box");
     switch (object->type) {
         case OBJ_RECT:    object->as_rect.rec = bounding_box; break;
         case OBJ_TEXTURE: object->as_texture.rec = bounding_box; break;
+        case COUNT_OBJS:
         default: UNREACHABLE("invalid object type: you have a memory corruption somewhere. good luck");
     }
 }
@@ -431,6 +438,7 @@ void update_main_area(void) {
 
 void draw_scene(void) {
     da_foreach(Object, object, &g->objects) {
+        static_assert(COUNT_OBJS == 2, "Exhaustive handling of object types in draw_scene");
         switch (object->type) {
             case OBJ_TEXTURE: {
                 Texture texture = object->as_texture.texture;
@@ -440,6 +448,7 @@ void draw_scene(void) {
             case OBJ_RECT: {
                 DrawRectangleRec(object->as_rect.rec, object->as_rect.color);
             } break;
+            case COUNT_OBJS:
             default: UNREACHABLE("invalid object type: you have a memory corruption somewhere. good luck");
         }
     }
