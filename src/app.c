@@ -46,19 +46,24 @@ typedef enum {
 #define OBJ_NAME_MAX 128
 typedef struct {
     Object_Type type;
-    Rectangle rec;
     char name[OBJ_NAME_MAX];
     size_t name_len;
     union {
-        Texture as_texture;
-        Color as_rect_color;
+        struct {
+            Rectangle rec;
+            Texture texture;
+        } as_texture;
+        struct {
+            Rectangle rec;
+            Color color;
+        } as_rect;
     };
 } Object;
 
 void object_unload(Object *object) {
     switch (object->type) {
         case OBJ_TEXTURE:
-            UnloadTexture(object->as_texture);
+            UnloadTexture(object->as_texture.texture);
             break;
         case OBJ_RECT:
             break;
@@ -71,6 +76,22 @@ void object_set_name(Object *object, String_View name) {
     if (count > OBJ_NAME_MAX) count = OBJ_NAME_MAX;
     memcpy(object->name, name.data, count);
     object->name_len = count;
+}
+
+Rectangle object_get_bounding_box(const Object *object) {
+    switch (object->type) {
+        case OBJ_RECT: return object->as_rect.rec;
+        case OBJ_TEXTURE: return object->as_texture.rec;
+        default: UNREACHABLE("invalid object type: you have a memory corruption somewhere. good luck");
+    }
+}
+
+void object_set_bounding_box(Object *object, Rectangle bounding_box) {
+    switch (object->type) {
+        case OBJ_RECT:    object->as_rect.rec = bounding_box; break;
+        case OBJ_TEXTURE: object->as_texture.rec = bounding_box; break;
+        default: UNREACHABLE("invalid object type: you have a memory corruption somewhere. good luck");
+    }
 }
 
 typedef struct {
@@ -108,7 +129,7 @@ struct App {
     MouseCursor prev_mouse_cursor;
 
     Rectangle canvas_bounds;
-    int selected_object;
+    int hovered_object;
 };
 
 App *g;
@@ -187,7 +208,7 @@ RGB_TO_HSV_IN_GLSL
 "\n");
 
     g->canvas_bounds = (Rectangle) {0, 0, 1920, 1080};
-    g->selected_object = -1;
+    g->hovered_object = -1;
 }
 
 App *app_pre_reload(void) {
@@ -291,89 +312,92 @@ void update_main_area(void) {
     int mouse_cursor = MOUSE_CURSOR_DEFAULT;
     if (g->tool == TOOL_MOVE && g->objects.count > 0) {
         for (Object *object = g->objects.items + g->objects.count - 1; object >= g->objects.items; object--) {
+            Rectangle bounding_box = object_get_bounding_box(object);
             Rectangle top_resize_hitbox = {
-                object->rec.x, object->rec.y - object_resize_hitbox_size / 2.0f,
-                object->rec.width, object_resize_hitbox_size,
+                bounding_box.x, bounding_box.y - object_resize_hitbox_size / 2.0f,
+                bounding_box.width, object_resize_hitbox_size,
             };
             Rectangle bottom_resize_hitbox = {
-                object->rec.x, object->rec.y + object->rec.height - object_resize_hitbox_size / 2.0f,
-                object->rec.width, object_resize_hitbox_size,
+                bounding_box.x, bounding_box.y + bounding_box.height - object_resize_hitbox_size / 2.0f,
+                bounding_box.width, object_resize_hitbox_size,
             };
             Rectangle left_resize_hitbox = {
-                object->rec.x - object_resize_hitbox_size / 2.0f, object->rec.y,
-                object_resize_hitbox_size, object->rec.height,
+                bounding_box.x - object_resize_hitbox_size / 2.0f, bounding_box.y,
+                object_resize_hitbox_size, bounding_box.height,
             };
             Rectangle right_resize_hitbox = {
-                object->rec.x + object->rec.width - object_resize_hitbox_size / 2.0f, object->rec.y,
-                object_resize_hitbox_size, object->rec.height,
+                bounding_box.x + bounding_box.width - object_resize_hitbox_size / 2.0f, bounding_box.y,
+                object_resize_hitbox_size, bounding_box.height,
             };
 
             if (CheckCollisionPointRec(mouse_pos, top_resize_hitbox) && CheckCollisionPointRec(mouse_pos, left_resize_hitbox)) {
                 mouse_cursor = MOUSE_CURSOR_CROSSHAIR;
 
                 if (is_move_down) {
-                    object->rec.y += mouse_delta.y;
-                    object->rec.height -= mouse_delta.y;
-                    object->rec.x += mouse_delta.x;
-                    object->rec.width -= mouse_delta.x;
+                    bounding_box.y += mouse_delta.y;
+                    bounding_box.height -= mouse_delta.y;
+                    bounding_box.x += mouse_delta.x;
+                    bounding_box.width -= mouse_delta.x;
                 }
             } else if (CheckCollisionPointRec(mouse_pos, top_resize_hitbox) && CheckCollisionPointRec(mouse_pos, right_resize_hitbox)) {
                 mouse_cursor = MOUSE_CURSOR_CROSSHAIR;
 
                 if (is_move_down) {
-                    object->rec.y += mouse_delta.y;
-                    object->rec.height -= mouse_delta.y;
-                    object->rec.width += mouse_delta.x;
+                    bounding_box.y += mouse_delta.y;
+                    bounding_box.height -= mouse_delta.y;
+                    bounding_box.width += mouse_delta.x;
                 }
             } else if (CheckCollisionPointRec(mouse_pos, bottom_resize_hitbox) && CheckCollisionPointRec(mouse_pos, left_resize_hitbox)) {
                 mouse_cursor = MOUSE_CURSOR_CROSSHAIR;
 
                 if (is_move_down) {
-                    object->rec.height += mouse_delta.y;
-                    object->rec.x += mouse_delta.x;
-                    object->rec.width -= mouse_delta.x;
+                    bounding_box.height += mouse_delta.y;
+                    bounding_box.x += mouse_delta.x;
+                    bounding_box.width -= mouse_delta.x;
                 }
             } else if (CheckCollisionPointRec(mouse_pos, bottom_resize_hitbox) && CheckCollisionPointRec(mouse_pos, right_resize_hitbox)) {
                 mouse_cursor = MOUSE_CURSOR_CROSSHAIR;
 
                 if (is_move_down) {
-                    object->rec.height += mouse_delta.y;
-                    object->rec.width += mouse_delta.x;
+                    bounding_box.height += mouse_delta.y;
+                    bounding_box.width += mouse_delta.x;
                 }
             } else if (CheckCollisionPointRec(mouse_pos, top_resize_hitbox)) {
                 mouse_cursor = MOUSE_CURSOR_RESIZE_NS;
 
                 if (is_move_down) {
-                    object->rec.y += mouse_delta.y;
-                    object->rec.height -= mouse_delta.y;
+                    bounding_box.y += mouse_delta.y;
+                    bounding_box.height -= mouse_delta.y;
                 }
             } else if (CheckCollisionPointRec(mouse_pos, bottom_resize_hitbox)) {
                 mouse_cursor = MOUSE_CURSOR_RESIZE_NS;
 
                 if (is_move_down) {
-                    object->rec.height += mouse_delta.y;
+                    bounding_box.height += mouse_delta.y;
                 }
             } else if (CheckCollisionPointRec(mouse_pos, left_resize_hitbox)) {
                 mouse_cursor = MOUSE_CURSOR_RESIZE_EW;
 
                 if (is_move_down) {
-                    object->rec.x += mouse_delta.x;
-                    object->rec.width -= mouse_delta.x;
+                    bounding_box.x += mouse_delta.x;
+                    bounding_box.width -= mouse_delta.x;
                 }
             } else if (CheckCollisionPointRec(mouse_pos, right_resize_hitbox)) {
                 mouse_cursor = MOUSE_CURSOR_RESIZE_EW;
 
                 if (is_move_down) {
-                    object->rec.width += mouse_delta.x;
+                    bounding_box.width += mouse_delta.x;
                 }
-            } else if (CheckCollisionPointRec(mouse_pos, object->rec)) {
+            } else if (CheckCollisionPointRec(mouse_pos, bounding_box)) {
                 mouse_cursor = MOUSE_CURSOR_RESIZE_ALL;
 
                 if (is_move_down) {
-                    object->rec.x += mouse_delta.x;
-                    object->rec.y += mouse_delta.y;
+                    bounding_box.x += mouse_delta.x;
+                    bounding_box.y += mouse_delta.y;
                 }
             } else continue;
+
+            object_set_bounding_box(object, bounding_box);
 
             break;
         }
@@ -385,8 +409,10 @@ void update_main_area(void) {
         if (IsMouseButtonReleased(MOUSE_BUTTON_DRAW_RECT)) {
             Object object = {
                 .type = OBJ_RECT,
-                .rec = get_current_rect(),
-                .as_rect_color = g->current_color,
+                .as_rect = {
+                    .rec = get_current_rect(),
+                    .color = g->current_color,
+                },
             };
             object_set_name(&object, sv_from_cstr(temp_sprintf("Rectangle (#%02hhx%02hhx%02hhx)", g->current_color.r, g->current_color.g, g->current_color.b)));
             da_append(&g->objects, object);
@@ -407,12 +433,12 @@ void draw_scene(void) {
     da_foreach(Object, object, &g->objects) {
         switch (object->type) {
             case OBJ_TEXTURE: {
-                Texture texture = object->as_texture;
+                Texture texture = object->as_texture.texture;
                 Rectangle source = { 0, 0, texture.width, texture.height };
-                DrawTexturePro(texture, source, object->rec, Vector2Zero(), 0.0f, WHITE);
+                DrawTexturePro(texture, source, object->as_texture.rec, Vector2Zero(), 0.0f, WHITE);
             } break;
             case OBJ_RECT: {
-                DrawRectangleRec(object->rec, object->as_rect_color);
+                DrawRectangleRec(object->as_rect.rec, object->as_rect.color);
             } break;
             default: UNREACHABLE("invalid object type: you have a memory corruption somewhere. good luck");
         }
@@ -422,8 +448,10 @@ void draw_scene(void) {
 void add_image_object(const char *path) {
     Texture texture = LoadTexture(path);
     Object object = {
-        .as_texture = texture,
-        .rec = { 0, 0, texture.width, texture.height },
+        .as_texture = {
+            .rec = { 0, 0, texture.width, texture.height },
+            .texture = texture,
+        },
     };
     String_View path_sv = sv_from_cstr(path);
     assert(path_sv.count > 0);
@@ -500,7 +528,7 @@ void app_update(void) {
                         }
                         g->objects.count = 0;
                         add_image_object(path);
-                        g->canvas_bounds = g->objects.items[0].rec;
+                        g->canvas_bounds = g->objects.items[0].as_texture.rec;
                     }
                 }
                 if (button(CLAY_ID("ExportButton"), CLAY_STRING("Export Image")).pressed) {
@@ -600,14 +628,14 @@ void app_update(void) {
                     .layout.layoutDirection = CLAY_TOP_TO_BOTTOM,
                     .scroll.vertical = true,
                 }) {
-                    g->selected_object = -1;
+                    g->hovered_object = -1;
                     for (Object *object = g->objects.items + g->objects.count - 1; object >= g->objects.items; object--) {
                         CLAY({
                             .layout.sizing = { CLAY_SIZING_GROW(), CLAY_SIZING_FIT() },
                             .layout.childGap = 3,
                             .layout.layoutDirection = CLAY_LEFT_TO_RIGHT,
                         }) {
-                            if (Clay_Hovered()) g->selected_object = object - g->objects.items;
+                            if (Clay_Hovered()) g->hovered_object = object - g->objects.items;
                             Clay_String name = {
                                 .chars = object->name,
                                 .length = object->name_len,
@@ -669,8 +697,8 @@ void app_update(void) {
                 DrawRectangleLinesEx(get_current_rect(), 5, WHITE);
             }
 
-            if (g->selected_object != -1) {
-                Rectangle rec = g->objects.items[g->selected_object].rec;
+            if (g->hovered_object != -1) {
+                Rectangle rec = object_get_bounding_box(&g->objects.items[g->hovered_object]);
                 DrawRectangleLinesEx(rec, HOVERED_OBJECT_OUTLINE_THICKNESS / g->camera.zoom, WHITE);
             }
 
