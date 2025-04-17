@@ -448,6 +448,7 @@ void update_main_area(void) {
                 } else continue;
 
                 object_set_bounding_box(object, bounding_box);
+                g->hovered_object = object - g->objects.items;
 
                 break;
             }
