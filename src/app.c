@@ -1,5 +1,6 @@
 #include "app.h"
 
+#include <math.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -34,13 +35,21 @@ Clay_String clay_string_from_cstr(const char *cstr) {
 #define MOUSE_BUTTON_PAN MOUSE_BUTTON_RIGHT
 #define MOUSE_BUTTON_MOVE_OBJECT MOUSE_BUTTON_LEFT
 #define MOUSE_BUTTON_DRAW_RECT MOUSE_BUTTON_LEFT
+#define MOUSE_BUTTON_DRAW MOUSE_BUTTON_LEFT
 
 #define OBJECT_RESIZE_HITBOX_SIZE 30
 #define HOVERED_OBJECT_OUTLINE_THICKNESS 5
 
+typedef struct {
+    Vector2 *items;
+    size_t count, capacity;
+    Color color;
+} Stroke;
+
 typedef enum {
     OBJ_TEXTURE,
     OBJ_RECT,
+    OBJ_STROKE,
     COUNT_OBJS,
 } Object_Type;
 
@@ -58,16 +67,19 @@ typedef struct {
             Rectangle rec;
             Color color;
         } as_rect;
+        Stroke as_stroke;
     };
 } Object;
 
 void object_unload(Object *object) {
-    static_assert(COUNT_OBJS == 2, "Exhaustive handling of object types in object_unload");
+    static_assert(COUNT_OBJS == 3, "Exhaustive handling of object types in object_unload");
     switch (object->type) {
         case OBJ_TEXTURE:
             UnloadTexture(object->as_texture.texture);
             break;
-        case OBJ_RECT:
+        case OBJ_RECT: break;
+        case OBJ_STROKE:
+            da_free(object->as_stroke);
             break;
         case COUNT_OBJS:
         default: UNREACHABLE("invalid object type: you have a memory corruption somewhere. good luck");
@@ -82,20 +94,47 @@ void object_set_name(Object *object, String_View name) {
 }
 
 Rectangle object_get_bounding_box(const Object *object) {
-    static_assert(COUNT_OBJS == 2, "Exhaustive handling of object types in object_get_bounding_box");
+    static_assert(COUNT_OBJS == 3, "Exhaustive handling of object types in object_get_bounding_box");
     switch (object->type) {
         case OBJ_RECT: return object->as_rect.rec;
         case OBJ_TEXTURE: return object->as_texture.rec;
+        case OBJ_STROKE: {
+            Vector2 min = {INFINITY, INFINITY};
+            Vector2 max = {-INFINITY, -INFINITY};
+
+            da_foreach(Vector2, point, &object->as_stroke) {
+                min = Vector2Min(min, *point);
+                max = Vector2Max(max, *point);
+            }
+
+            return (Rectangle) { min.x, min.y, max.x - min.x, max.y - min.y };
+        } break;
         case COUNT_OBJS:
         default: UNREACHABLE("invalid object type: you have a memory corruption somewhere. good luck");
     }
 }
 
-void object_set_bounding_box(Object *object, Rectangle bounding_box) {
-    static_assert(COUNT_OBJS == 2, "Exhaustive handling of object types in object_set_bounding_box");
+void object_set_bounding_box(Object *object, Rectangle new) {
+    static_assert(COUNT_OBJS == 3, "Exhaustive handling of object types in object_set_bounding_box");
     switch (object->type) {
-        case OBJ_RECT:    object->as_rect.rec = bounding_box; break;
-        case OBJ_TEXTURE: object->as_texture.rec = bounding_box; break;
+        case OBJ_RECT:    object->as_rect.rec = new; break;
+        case OBJ_TEXTURE: object->as_texture.rec = new; break;
+        case OBJ_STROKE: {
+            Rectangle old = object_get_bounding_box(object);
+            Vector2 old_min = {old.x, old.y};
+            Vector2 new_min = {new.x, new.y};
+            Vector2 old_size = {old.width, old.height};
+            Vector2 new_size = {new.width, new.height};
+
+            //Vector2 translate = Vector2Subtract(new_min, old_min);
+            Vector2 scale = Vector2Divide(new_size, old_size);
+
+            da_foreach(Vector2, point, &object->as_stroke) {
+                Vector2 old_point_rel = Vector2Subtract(*point, old_min);
+                Vector2 new_point_rel = Vector2Multiply(old_point_rel, scale);
+                *point = Vector2Add(new_point_rel, new_min);
+            }
+        } break;
         case COUNT_OBJS:
         default: UNREACHABLE("invalid object type: you have a memory corruption somewhere. good luck");
     }
@@ -109,6 +148,7 @@ typedef struct {
 typedef enum {
     TOOL_MOVE = 0,
     TOOL_RECT,
+    TOOL_DRAW,
     TOOL_CHANGE_CANVAS,
     COUNT_TOOLS,
 } Tool;
@@ -137,6 +177,7 @@ struct App {
 
     Rectangle canvas_bounds;
     int hovered_object;
+    Stroke current_stroke;
 };
 
 App *g;
@@ -317,128 +358,156 @@ void update_main_area(void) {
     bool is_move_down = IsMouseButtonDown(MOUSE_BUTTON_MOVE_OBJECT);
     Vector2 mouse_pos = GetScreenToWorld2D(GetMousePosition(), g->camera);
     int mouse_cursor = MOUSE_CURSOR_DEFAULT;
-    if (g->tool == TOOL_MOVE && g->objects.count > 0) {
-        for (Object *object = g->objects.items + g->objects.count - 1; object >= g->objects.items; object--) {
-            Rectangle bounding_box = object_get_bounding_box(object);
-            Rectangle top_resize_hitbox = {
-                bounding_box.x, bounding_box.y - object_resize_hitbox_size / 2.0f,
-                bounding_box.width, object_resize_hitbox_size,
-            };
-            Rectangle bottom_resize_hitbox = {
-                bounding_box.x, bounding_box.y + bounding_box.height - object_resize_hitbox_size / 2.0f,
-                bounding_box.width, object_resize_hitbox_size,
-            };
-            Rectangle left_resize_hitbox = {
-                bounding_box.x - object_resize_hitbox_size / 2.0f, bounding_box.y,
-                object_resize_hitbox_size, bounding_box.height,
-            };
-            Rectangle right_resize_hitbox = {
-                bounding_box.x + bounding_box.width - object_resize_hitbox_size / 2.0f, bounding_box.y,
-                object_resize_hitbox_size, bounding_box.height,
-            };
+    static_assert(COUNT_TOOLS == 4, "Exhaustive handling of tools in update_main_area");
+    switch (g->tool) {
+        case TOOL_MOVE: if (g->objects.count > 0) {
+            for (Object *object = g->objects.items + g->objects.count - 1; object >= g->objects.items; object--) {
+                Rectangle bounding_box = object_get_bounding_box(object);
+                Rectangle top_resize_hitbox = {
+                    bounding_box.x, bounding_box.y - object_resize_hitbox_size / 2.0f,
+                    bounding_box.width, object_resize_hitbox_size,
+                };
+                Rectangle bottom_resize_hitbox = {
+                    bounding_box.x, bounding_box.y + bounding_box.height - object_resize_hitbox_size / 2.0f,
+                    bounding_box.width, object_resize_hitbox_size,
+                };
+                Rectangle left_resize_hitbox = {
+                    bounding_box.x - object_resize_hitbox_size / 2.0f, bounding_box.y,
+                    object_resize_hitbox_size, bounding_box.height,
+                };
+                Rectangle right_resize_hitbox = {
+                    bounding_box.x + bounding_box.width - object_resize_hitbox_size / 2.0f, bounding_box.y,
+                    object_resize_hitbox_size, bounding_box.height,
+                };
 
-            if (CheckCollisionPointRec(mouse_pos, top_resize_hitbox) && CheckCollisionPointRec(mouse_pos, left_resize_hitbox)) {
-                mouse_cursor = MOUSE_CURSOR_CROSSHAIR;
+                if (CheckCollisionPointRec(mouse_pos, top_resize_hitbox) && CheckCollisionPointRec(mouse_pos, left_resize_hitbox)) {
+                    mouse_cursor = MOUSE_CURSOR_CROSSHAIR;
 
-                if (is_move_down) {
-                    bounding_box.y += mouse_delta.y;
-                    bounding_box.height -= mouse_delta.y;
-                    bounding_box.x += mouse_delta.x;
-                    bounding_box.width -= mouse_delta.x;
-                }
-            } else if (CheckCollisionPointRec(mouse_pos, top_resize_hitbox) && CheckCollisionPointRec(mouse_pos, right_resize_hitbox)) {
-                mouse_cursor = MOUSE_CURSOR_CROSSHAIR;
+                    if (is_move_down) {
+                        bounding_box.y += mouse_delta.y;
+                        bounding_box.height -= mouse_delta.y;
+                        bounding_box.x += mouse_delta.x;
+                        bounding_box.width -= mouse_delta.x;
+                    }
+                } else if (CheckCollisionPointRec(mouse_pos, top_resize_hitbox) && CheckCollisionPointRec(mouse_pos, right_resize_hitbox)) {
+                    mouse_cursor = MOUSE_CURSOR_CROSSHAIR;
 
-                if (is_move_down) {
-                    bounding_box.y += mouse_delta.y;
-                    bounding_box.height -= mouse_delta.y;
-                    bounding_box.width += mouse_delta.x;
-                }
-            } else if (CheckCollisionPointRec(mouse_pos, bottom_resize_hitbox) && CheckCollisionPointRec(mouse_pos, left_resize_hitbox)) {
-                mouse_cursor = MOUSE_CURSOR_CROSSHAIR;
+                    if (is_move_down) {
+                        bounding_box.y += mouse_delta.y;
+                        bounding_box.height -= mouse_delta.y;
+                        bounding_box.width += mouse_delta.x;
+                    }
+                } else if (CheckCollisionPointRec(mouse_pos, bottom_resize_hitbox) && CheckCollisionPointRec(mouse_pos, left_resize_hitbox)) {
+                    mouse_cursor = MOUSE_CURSOR_CROSSHAIR;
 
-                if (is_move_down) {
-                    bounding_box.height += mouse_delta.y;
-                    bounding_box.x += mouse_delta.x;
-                    bounding_box.width -= mouse_delta.x;
-                }
-            } else if (CheckCollisionPointRec(mouse_pos, bottom_resize_hitbox) && CheckCollisionPointRec(mouse_pos, right_resize_hitbox)) {
-                mouse_cursor = MOUSE_CURSOR_CROSSHAIR;
+                    if (is_move_down) {
+                        bounding_box.height += mouse_delta.y;
+                        bounding_box.x += mouse_delta.x;
+                        bounding_box.width -= mouse_delta.x;
+                    }
+                } else if (CheckCollisionPointRec(mouse_pos, bottom_resize_hitbox) && CheckCollisionPointRec(mouse_pos, right_resize_hitbox)) {
+                    mouse_cursor = MOUSE_CURSOR_CROSSHAIR;
 
-                if (is_move_down) {
-                    bounding_box.height += mouse_delta.y;
-                    bounding_box.width += mouse_delta.x;
-                }
-            } else if (CheckCollisionPointRec(mouse_pos, top_resize_hitbox)) {
-                mouse_cursor = MOUSE_CURSOR_RESIZE_NS;
+                    if (is_move_down) {
+                        bounding_box.height += mouse_delta.y;
+                        bounding_box.width += mouse_delta.x;
+                    }
+                } else if (CheckCollisionPointRec(mouse_pos, top_resize_hitbox)) {
+                    mouse_cursor = MOUSE_CURSOR_RESIZE_NS;
 
-                if (is_move_down) {
-                    bounding_box.y += mouse_delta.y;
-                    bounding_box.height -= mouse_delta.y;
-                }
-            } else if (CheckCollisionPointRec(mouse_pos, bottom_resize_hitbox)) {
-                mouse_cursor = MOUSE_CURSOR_RESIZE_NS;
+                    if (is_move_down) {
+                        bounding_box.y += mouse_delta.y;
+                        bounding_box.height -= mouse_delta.y;
+                    }
+                } else if (CheckCollisionPointRec(mouse_pos, bottom_resize_hitbox)) {
+                    mouse_cursor = MOUSE_CURSOR_RESIZE_NS;
 
-                if (is_move_down) {
-                    bounding_box.height += mouse_delta.y;
-                }
-            } else if (CheckCollisionPointRec(mouse_pos, left_resize_hitbox)) {
-                mouse_cursor = MOUSE_CURSOR_RESIZE_EW;
+                    if (is_move_down) {
+                        bounding_box.height += mouse_delta.y;
+                    }
+                } else if (CheckCollisionPointRec(mouse_pos, left_resize_hitbox)) {
+                    mouse_cursor = MOUSE_CURSOR_RESIZE_EW;
 
-                if (is_move_down) {
-                    bounding_box.x += mouse_delta.x;
-                    bounding_box.width -= mouse_delta.x;
-                }
-            } else if (CheckCollisionPointRec(mouse_pos, right_resize_hitbox)) {
-                mouse_cursor = MOUSE_CURSOR_RESIZE_EW;
+                    if (is_move_down) {
+                        bounding_box.x += mouse_delta.x;
+                        bounding_box.width -= mouse_delta.x;
+                    }
+                } else if (CheckCollisionPointRec(mouse_pos, right_resize_hitbox)) {
+                    mouse_cursor = MOUSE_CURSOR_RESIZE_EW;
 
-                if (is_move_down) {
-                    bounding_box.width += mouse_delta.x;
-                }
-            } else if (CheckCollisionPointRec(mouse_pos, bounding_box)) {
-                mouse_cursor = MOUSE_CURSOR_RESIZE_ALL;
+                    if (is_move_down) {
+                        bounding_box.width += mouse_delta.x;
+                    }
+                } else if (CheckCollisionPointRec(mouse_pos, bounding_box)) {
+                    mouse_cursor = MOUSE_CURSOR_RESIZE_ALL;
 
-                if (is_move_down) {
-                    bounding_box.x += mouse_delta.x;
-                    bounding_box.y += mouse_delta.y;
-                }
-            } else continue;
+                    if (is_move_down) {
+                        bounding_box.x += mouse_delta.x;
+                        bounding_box.y += mouse_delta.y;
+                    }
+                } else continue;
 
-            object_set_bounding_box(object, bounding_box);
+                object_set_bounding_box(object, bounding_box);
 
+                break;
+            }
+        } break;
+        case TOOL_RECT:
+            if (IsMouseButtonPressed(MOUSE_BUTTON_DRAW_RECT)) {
+                g->rect_start = mouse_pos;
+            }
+
+            if (IsMouseButtonReleased(MOUSE_BUTTON_DRAW_RECT)) {
+                Object object = {
+                    .type = OBJ_RECT,
+                    .as_rect = {
+                        .rec = get_current_rect(),
+                        .color = g->current_color,
+                    },
+                };
+                object_set_name(&object, sv_from_cstr(temp_sprintf("Rectangle (#%02hhx%02hhx%02hhx)", g->current_color.r, g->current_color.g, g->current_color.b)));
+                da_append(&g->objects, object);
+            }
             break;
-        }
-    } else if (g->tool == TOOL_RECT) {
-        if (IsMouseButtonPressed(MOUSE_BUTTON_DRAW_RECT)) {
-            g->rect_start = mouse_pos;
-        }
+        case TOOL_CHANGE_CANVAS:
+            if (IsMouseButtonPressed(MOUSE_BUTTON_DRAW_RECT)) {
+                g->rect_start = mouse_pos;
+            }
 
-        if (IsMouseButtonReleased(MOUSE_BUTTON_DRAW_RECT)) {
-            Object object = {
-                .type = OBJ_RECT,
-                .as_rect = {
-                    .rec = get_current_rect(),
-                    .color = g->current_color,
-                },
-            };
-            object_set_name(&object, sv_from_cstr(temp_sprintf("Rectangle (#%02hhx%02hhx%02hhx)", g->current_color.r, g->current_color.g, g->current_color.b)));
-            da_append(&g->objects, object);
-        }
-    } else if (g->tool == TOOL_CHANGE_CANVAS) {
-        if (IsMouseButtonPressed(MOUSE_BUTTON_DRAW_RECT)) {
-            g->rect_start = mouse_pos;
-        }
+            if (IsMouseButtonReleased(MOUSE_BUTTON_DRAW_RECT)) {
+                g->canvas_bounds = get_current_rect();
+            }
+            break;
+        case TOOL_DRAW:
+            if (IsMouseButtonPressed(MOUSE_BUTTON_DRAW)) {
+                assert(g->current_stroke.items == NULL
+                    && g->current_stroke.count == 0
+                    && g->current_stroke.capacity == 0);
+                g->current_stroke.color = g->current_color;
+            }
 
-        if (IsMouseButtonReleased(MOUSE_BUTTON_DRAW_RECT)) {
-            g->canvas_bounds = get_current_rect();
-        }
+            if (IsMouseButtonDown(MOUSE_BUTTON_DRAW)) {
+                da_append(&g->current_stroke, mouse_pos);
+            }
+
+            if (IsMouseButtonReleased(MOUSE_BUTTON_DRAW)) {
+                Object object = {
+                    .type = OBJ_STROKE,
+                    .as_stroke = g->current_stroke,
+                };
+                object_set_name(&object, sv_from_cstr("Stroke"));
+                da_append(&g->objects, object);
+                memset(&g->current_stroke, 0, sizeof(g->current_stroke));
+            }
+            break;
+        default: UNREACHABLE("invalid tool: you have a memory corruption somewhere. good luck");
     }
     set_cursor(mouse_cursor);
 }
 
 void draw_scene(void) {
     da_foreach(Object, object, &g->objects) {
-        static_assert(COUNT_OBJS == 2, "Exhaustive handling of object types in draw_scene");
+        static_assert(COUNT_OBJS == 3, "Exhaustive handling of object types in draw_scene");
         switch (object->type) {
             case OBJ_TEXTURE: {
                 Texture texture = object->as_texture.texture;
@@ -447,6 +516,10 @@ void draw_scene(void) {
             } break;
             case OBJ_RECT: {
                 DrawRectangleRec(object->as_rect.rec, object->as_rect.color);
+            } break;
+            case OBJ_STROKE: {
+                Stroke stroke = object->as_stroke;
+                DrawLineStrip(stroke.items, stroke.count, stroke.color);
             } break;
             case COUNT_OBJS:
             default: UNREACHABLE("invalid object type: you have a memory corruption somewhere. good luck");
@@ -577,6 +650,7 @@ void app_update(void) {
             tool_button(CLAY_ID("ChangeCanvasButton"), CLAY_STRING("ChangeCanvas"), TOOL_CHANGE_CANVAS);
             tool_button(CLAY_ID("MoveButton"), CLAY_STRING("Move"), TOOL_MOVE);
             tool_button(CLAY_ID("RectangleButton"), CLAY_STRING("Rectangle"), TOOL_RECT);
+            tool_button(CLAY_ID("DrawButton"), CLAY_STRING("Draw"), TOOL_DRAW);
             if (button(CLAY_ID("AddImageButton"), CLAY_STRING("Add Image")).pressed) {
                 const char *filter_patterns[] = { "*.png", "*.jpg", "*.tga", "*.bmp", "*.psd", "*.gif", "*.hdr", "*.pic", "*.ppm" };
                 const char *path = tinyfd_openFileDialog("Add Image", NULL, ARRAY_LEN(filter_patterns), filter_patterns, "Image", 0);
@@ -699,11 +773,17 @@ void app_update(void) {
 
             draw_scene();
 
-            if (g->tool == TOOL_RECT && CheckCollisionPointRec(GetMousePosition(), main_area) && IsMouseButtonDown(MOUSE_BUTTON_DRAW_RECT)) {
-                DrawRectangleRec(get_current_rect(), g->current_color);
-            }
-            if (g->tool == TOOL_CHANGE_CANVAS && CheckCollisionPointRec(GetMousePosition(), main_area) && IsMouseButtonDown(MOUSE_BUTTON_DRAW_RECT)) {
-                DrawRectangleLinesEx(get_current_rect(), 5, WHITE);
+            if (CheckCollisionPointRec(GetMousePosition(), main_area)) {
+                if (g->tool == TOOL_RECT && IsMouseButtonDown(MOUSE_BUTTON_DRAW_RECT)) {
+                    DrawRectangleRec(get_current_rect(), g->current_color);
+                }
+                if (g->tool == TOOL_CHANGE_CANVAS && IsMouseButtonDown(MOUSE_BUTTON_DRAW_RECT)) {
+                    DrawRectangleLinesEx(get_current_rect(), 5, WHITE);
+                }
+                if (g->tool == TOOL_DRAW && IsMouseButtonDown(MOUSE_BUTTON_DRAW)) {
+                    Stroke stroke = g->current_stroke;
+                    DrawLineStrip(stroke.items, stroke.count, stroke.color);
+                }
             }
 
             if (g->hovered_object != -1) {
