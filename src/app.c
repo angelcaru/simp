@@ -44,6 +44,7 @@ typedef struct {
     Vector2 *items;
     size_t count, capacity;
     Color color;
+    float weight;
 } Stroke;
 
 typedef enum {
@@ -178,6 +179,7 @@ struct App {
     Rectangle canvas_bounds;
     int hovered_object;
     Stroke current_stroke;
+    float stroke_weight;
 };
 
 App *g;
@@ -485,6 +487,7 @@ void update_main_area(void) {
                     && g->current_stroke.count == 0
                     && g->current_stroke.capacity == 0);
                 g->current_stroke.color = g->current_color;
+                g->current_stroke.weight = g->stroke_weight;
             }
 
             if (IsMouseButtonDown(MOUSE_BUTTON_DRAW)) {
@@ -506,6 +509,15 @@ void update_main_area(void) {
     set_cursor(mouse_cursor);
 }
 
+void draw_stroke(Stroke stroke) {
+    if (stroke.count < 2) return;
+    for (size_t i = 0; i < stroke.count - 1; i++) {
+        Vector2 a = stroke.items[i];
+        Vector2 b = stroke.items[i+1];
+        DrawLineEx(a, b, stroke.weight, stroke.color);
+    }
+}
+
 void draw_scene(void) {
     da_foreach(Object, object, &g->objects) {
         static_assert(COUNT_OBJS == 3, "Exhaustive handling of object types in draw_scene");
@@ -519,8 +531,7 @@ void draw_scene(void) {
                 DrawRectangleRec(object->as_rect.rec, object->as_rect.color);
             } break;
             case OBJ_STROKE: {
-                Stroke stroke = object->as_stroke;
-                DrawLineStrip(stroke.items, stroke.count, stroke.color);
+                draw_stroke(object->as_stroke);
             } break;
             case COUNT_OBJS:
             default: UNREACHABLE("invalid object type: you have a memory corruption somewhere. good luck");
@@ -651,7 +662,44 @@ void app_update(void) {
             tool_button(CLAY_ID("ChangeCanvasButton"), CLAY_STRING("ChangeCanvas"), TOOL_CHANGE_CANVAS);
             tool_button(CLAY_ID("MoveButton"), CLAY_STRING("Move"), TOOL_MOVE);
             tool_button(CLAY_ID("RectangleButton"), CLAY_STRING("Rectangle"), TOOL_RECT);
-            tool_button(CLAY_ID("DrawButton"), CLAY_STRING("Draw"), TOOL_DRAW);
+            CLAY({
+                .id = CLAY_ID("DrawButtonContainer"),
+                .layout.layoutDirection = CLAY_LEFT_TO_RIGHT,
+                .layout.childAlignment.y = CLAY_ALIGN_Y_CENTER,
+                .layout.childGap = 5,
+            }) {
+                tool_button(CLAY_ID("DrawButton"), CLAY_STRING("Draw"), TOOL_DRAW);
+                if (g->tool == TOOL_DRAW) {
+                    const float slider_width = 100;
+                    const float max_stroke_weight = 20;
+                    const float knob_size = 20;
+                    CLAY({
+                        .id = CLAY_ID("StrokeWeightSlider"),
+                        .layout.sizing = { CLAY_SIZING_FIXED(slider_width), CLAY_SIZING_FIXED(3) },
+                        .layout.childAlignment.y = CLAY_ALIGN_Y_CENTER,
+                        .backgroundColor = {255, 255, 255, 255},
+                    }) {
+                        bool hovered = Clay_Hovered();
+                        float pos = Lerp(0, slider_width, g->stroke_weight / max_stroke_weight);
+                        CLAY({ .layout.sizing.width = CLAY_SIZING_FIXED(pos - knob_size / 2) });
+                        CLAY({
+                            .layout.sizing = { CLAY_SIZING_FIXED(knob_size), CLAY_SIZING_FIXED(knob_size) },
+                            .cornerRadius = CLAY_CORNER_RADIUS(knob_size),
+                            .backgroundColor = {255, 255, 255, 255},
+                        }) hovered |= Clay_Hovered();
+
+                        if (hovered && IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
+                            float mouse_x = GetMouseX();
+                            Clay_BoundingBox bounding_box = Clay_GetElementData(CLAY_ID("StrokeWeightSlider")).boundingBox;
+                            g->stroke_weight = Lerp(1, max_stroke_weight, (mouse_x - bounding_box.x) / slider_width);
+                        }
+                    }
+                    CLAY_TEXT(clay_string_from_cstr(temp_sprintf("%f", g->stroke_weight)), CLAY_TEXT_CONFIG({
+                        .fontSize = 30,
+                        .textColor = {255, 255, 255, 255},
+                    }));
+                }
+            }
             if (button(CLAY_ID("AddImageButton"), CLAY_STRING("Add Image")).pressed) {
                 const char *filter_patterns[] = { "*.png", "*.jpg", "*.tga", "*.bmp", "*.psd", "*.gif", "*.hdr", "*.pic", "*.ppm" };
                 const char *path = tinyfd_openFileDialog("Add Image", NULL, ARRAY_LEN(filter_patterns), filter_patterns, "Image", 0);
@@ -782,8 +830,7 @@ void app_update(void) {
                     DrawRectangleLinesEx(get_current_rect(), 5, WHITE);
                 }
                 if (g->tool == TOOL_DRAW && IsMouseButtonDown(MOUSE_BUTTON_DRAW)) {
-                    Stroke stroke = g->current_stroke;
-                    DrawLineStrip(stroke.items, stroke.count, stroke.color);
+                    draw_stroke(g->current_stroke);
                 }
             }
 
