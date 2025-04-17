@@ -416,6 +416,31 @@ void draw_scene(void) {
     }
 }
 
+void add_image_object(const char *path) {
+    Texture texture = LoadTexture(path);
+    Object object = {
+        .as_texture = texture,
+        .rec = { 0, 0, texture.width, texture.height },
+    };
+    String_View path_sv = sv_from_cstr(path);
+    assert(path_sv.count > 0);
+    int i;
+    for (i = path_sv.count - 1; i >= 0; i--) {
+        if (
+            path_sv.data[i] == '/'
+            #ifdef _WIN32
+            || path_sv.data[i] == '\\'
+            #endif
+        ) {
+            i++;
+            break;
+        }
+    }
+    path_sv = sv_from_parts(path_sv.data + i, path_sv.count - i);
+    object_set_name(&object, path_sv);
+    da_append(&g->objects, object);
+}
+
 void app_update(void) {
     size_t temp_checkpoint = temp_save();
 
@@ -471,29 +496,8 @@ void app_update(void) {
                             object_unload(object);
                         }
                         g->objects.count = 0;
-                        Texture texture = LoadTexture(path);
-                        Object object = {
-                            .as_texture = texture,
-                            .rec = { 0, 0, texture.width, texture.height },
-                        };
-                        String_View path_sv = sv_from_cstr(path);
-                        assert(path_sv.count > 0);
-                        int i;
-                        for (i = path_sv.count - 1; i >= 0; i--) {
-                            if (
-                                path_sv.data[i] == '/'
-                                #ifdef _WIN32
-                                || path_sv.data[i] == '\\'
-                                #endif
-                            ) {
-                                i++;
-                                break;
-                            }
-                        }
-                        path_sv = sv_from_parts(path_sv.data + i, path_sv.count - i);
-                        object_set_name(&object, path_sv);
-                        da_append(&g->objects, object);
-                        g->canvas_bounds = object.rec;
+                        add_image_object(path);
+                        g->canvas_bounds = g->objects.items[0].rec;
                     }
                 }
                 if (button(CLAY_ID("ExportButton"), CLAY_STRING("Export Image")).pressed) {
@@ -529,28 +533,7 @@ void app_update(void) {
                 const char *filter_patterns[] = { "*.png", "*.jpg", "*.tga", "*.bmp", "*.psd", "*.gif", "*.hdr", "*.pic", "*.ppm" };
                 const char *path = tinyfd_openFileDialog("Add Image", NULL, ARRAY_LEN(filter_patterns), filter_patterns, "Image", 0);
                 if (path != NULL) {
-                    Texture texture = LoadTexture(path);
-                    Object object = {
-                        .as_texture = texture,
-                        .rec = { 0, 0, texture.width, texture.height },
-                    };
-                    String_View path_sv = sv_from_cstr(path);
-                    assert(path_sv.count > 0);
-                    int i;
-                    for (i = path_sv.count - 1; i >= 0; i--) {
-                        if (
-                            path_sv.data[i] == '/'
-                            #ifdef _WIN32
-                            || path_sv.data[i] == '\\'
-                            #endif
-                        ) {
-                            i++;
-                            break;
-                        }
-                    }
-                    path_sv = sv_from_parts(path_sv.data + i, path_sv.count - i);
-                    object_set_name(&object, path_sv);
-                    da_append(&g->objects, object);
+                    add_image_object(path);
                 }
             }
 
