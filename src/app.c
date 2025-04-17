@@ -787,6 +787,7 @@ void app_update(void) {
                 }
             }
 
+            if (g->hovered_object < 0 || (size_t)g->hovered_object >= g->objects.count) g->hovered_object = -1;
             if (g->hovered_object != -1) {
                 Rectangle rec = object_get_bounding_box(&g->objects.items[g->hovered_object]);
                 DrawRectangleLinesEx(rec, HOVERED_OBJECT_OUTLINE_THICKNESS / g->camera.zoom, WHITE);
