@@ -896,6 +896,9 @@ void app_update(void) {
                                 *object = *(object - 1);
                                 *(object - 1) = tmp;
                             }
+                            if (button((Clay_ElementId) {0}, CLAY_STRING("Fit")).pressed) {
+                                g->canvas_bounds = object_get_bounding_box(object);
+                            }
                             if (button((Clay_ElementId) {0}, CLAY_STRING("Remove")).pressed) {
                                 size_t i = object - g->objects.items;
                                 object_unload(object);

@@ -7,4 +7,3 @@ CompileFlags:
     - "-I../tinyfiledialogs"
     - "-xc"
     - "-std=gnu11"
-    - "-DPLATFORM_WEB"
