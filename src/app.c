@@ -666,6 +666,15 @@ void app_update(void) {
     Vector2 wheel_v = GetMouseWheelMoveV();
     Clay_UpdateScrollContainers(true, (Clay_Vector2) { wheel_v.x, wheel_v.y }, GetFrameTime());
 
+    if (IsFileDropped()) {
+        FilePathList files = LoadDroppedFiles();
+        for (size_t i = 0; i < files.count; i++) {
+            const char *path = files.paths[i];
+            add_image_object(path);
+        }
+        UnloadDroppedFiles(files);
+    }
+
     if (IsKeyPressed(KEY_D)) {
         Clay_SetDebugModeEnabled(!Clay_IsDebugModeEnabled());
     }
