@@ -11,7 +11,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-  
+
     permissions:
       id-token: write
       pages: write
@@ -19,7 +19,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build the game
+      - name: Build the program
         run: |
           sudo apt-get install emscripten
           cc -o nob nob.c
@@ -32,5 +32,3 @@ jobs:
 
       - name: Deploy GitHub Pages site
         uses: actions/deploy-pages@v4.0.5
-          
-          
