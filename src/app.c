@@ -16,6 +16,8 @@
 
 #include "tinyfiledialogs.h"
 
+#include "bundle.c"
+
 Clay_String clay_string_from_cstr(const char *cstr) {
     return (Clay_String) { .chars = cstr, .length = strlen(cstr), .isStaticallyAllocated = false };
 }
@@ -188,8 +190,74 @@ void handle_clay_error(Clay_ErrorData error) {
     nob_log(ERROR, "Clay Error: %.*s", error.errorText.length, error.errorText.chars);
 }
 
+#ifdef PLATFORM_WEB
+#include <emscripten/emscripten.h>
+EM_JS(void, save_file, (const unsigned char *data, size_t count), {
+    async function saveFile(data) {
+        if ("showSaveFilePicker" in window) {
+            const handle = await showSaveFilePicker();
+            const writable = await handle.createWritable();
+            await writable.write(data);
+            await writable.close();
+        } else {
+            const a = document.createElement("a");
+            const file = new Blob([data], { type: "image/png" });
+            a.href = URL.createObjectURL(file);
+            a.download = "image.png";
+            document.body.append(a);
+            a.click();
+            document.body.removeChild(a);
+        }
+    }
+
+    return saveFile(HEAPU8.subarray(data, data + count))
+        .catch(error => alert("Couldn't save file: " + String(error)));
+});
+
+//EM_JS(unsigned char *, load_file, (char *file_extension_buf, size_t *size), {
+//    async function loadFile() {
+//        if ("showOpenFilePicker" in window) {
+//            const [handle] = await showOpenFilePicker();
+//            debugger;
+//            const file = await handle.getFile();
+//            const data = new Uint8Array(await file.arrayBuffer());
+//            HEAPU32[size>>2] = data.byteLength;
+//            const extension = "." + file.name.split(".").at(-1);
+//            HEAPU8
+//                .subarray(file_extension_buf, file_extension_buf + extension.length)
+//                .set(new TextEncoder().encode(extension));
+//            const ptr = _malloc(data.byteLength);
+//            if (ptr === 0) {
+//                alert("Buy MORE RAM loll!!!!!!");
+//                return 0;
+//            }
+//            HEAPU8
+//                .subarray(ptr, ptr+data.byteLength)
+//                .set(data);
+//            return ptr;
+//        }
+//    }
+//
+//    return loadFile().catch(error => {
+//        alert("Couldn't load file: " + String(error));
+//        return 0;
+//    });
+//});
+#endif // PLATFORM_WEB
+
+#ifdef PLATFORM_WEB
+#define GLSL_BOILERPLATE \
+    "precision mediump float;\n" \
+    "#define in varying\n" \
+    "#define finalColor gl_FragColor\n"
+#else
+#define GLSL_BOILERPLATE \
+    "#version 330\n" \
+    "out vec4 finalColor;\n"
+#endif // PLATFORM_WEB
+
 // https://gist.github.com/983/e170a24ae8eba2cd174f
-#define RGB_TO_HSV_IN_GLSL  \
+#define GLSL_RGB_TO_HSV  \
     "vec3 rgb2hsv(vec3 c) {\n" \
     "    vec4 K = vec4(0.0, -1.0 / 3.0, 2.0 / 3.0, -1.0);\n" \
     "    vec4 p = mix(vec4(c.bg, K.wz), vec4(c.gb, K.xy), step(c.b, c.g));\n" \
@@ -217,7 +285,9 @@ void app_init(void) {
     uint64_t total_memory_size = Clay_MinMemorySize();
     Clay_Arena clay_arena = Clay_CreateArenaWithCapacityAndMemory(total_memory_size, malloc(total_memory_size));
 
-    g->font = LoadFont("./fonts/Alegreya-Regular.ttf");
+    // NOTE: I have no idea what the last 3 parameters of LoadFontFromMemory() mean,
+    // I just copied them from the source code of the regular LoadFont()
+    g->font = LoadFontFromMemory(".ttf", font_data, font_len, 32, NULL, 95);
     g->clay = Clay_Initialize(clay_arena, (Clay_Dimensions) { GetScreenWidth(), GetScreenHeight() }, (Clay_ErrorHandler) { handle_clay_error, 0 });
     Clay_SetMeasureTextFunction(Raylib_MeasureText, &g->font);
 
@@ -228,12 +298,10 @@ void app_init(void) {
     UnloadImage(one_by_one_image);
 
     g->hue_picker_shader = LoadShaderFromMemory(NULL,
-"#version 330\n"
-RGB_TO_HSV_IN_GLSL
+GLSL_BOILERPLATE
+GLSL_RGB_TO_HSV
 "in vec2 fragTexCoord;\n"
 "in vec4 fragColor;\n"
-
-"out vec4 finalColor;\n"
 
 "void main() {\n"
 "    float hue = fragTexCoord.x;\n"
@@ -242,17 +310,15 @@ RGB_TO_HSV_IN_GLSL
 "}\n"
 "\n");
     g->color_picker_shader = LoadShaderFromMemory(NULL,
-"#version 330\n"
-RGB_TO_HSV_IN_GLSL
+GLSL_BOILERPLATE
+GLSL_RGB_TO_HSV
 "in vec2 fragTexCoord;\n"
 "in vec4 fragColor;\n"
 
 "uniform float hue;\n"
 
-"out vec4 finalColor;\n"
-
 "void main() {\n"
-"    vec3 rgb = hsv2rgb(vec3(hue, fragTexCoord.x, 1-fragTexCoord.y));\n"
+"    vec3 rgb = hsv2rgb(vec3(hue, fragTexCoord.x, 1.0-fragTexCoord.y));\n"
 "    finalColor = vec4(rgb, 1.0);\n"
 "}\n"
 "\n");
@@ -349,6 +415,9 @@ void update_main_area(void) {
     g->camera.offset = (Vector2) { (float)GetScreenWidth() / 2, (float)GetScreenHeight() / 2 };
 
     float wheel = GetMouseWheelMove();
+#ifdef PLATFORM_WEB
+    wheel /= -240;
+#endif // PLATFORM_WEB
     g->camera.zoom *= wheel / 20.0f + 1;
 
     Vector2 mouse_delta = Vector2Scale(GetMouseDelta(), 1/g->camera.zoom);
@@ -566,6 +635,29 @@ void add_image_object(const char *path) {
     da_append(&g->objects, object);
 }
 
+RenderTexture export_image_to_render_texture(void) {
+    Camera2D camera = {
+        .zoom = 1.0f,
+        .offset = {-g->canvas_bounds.x, -g->canvas_bounds.y},
+    };
+
+    int width = g->canvas_bounds.width;
+    int height = g->canvas_bounds.height;
+
+    RenderTexture rtex_flipped = LoadRenderTexture(width, height);
+    TextureMode(rtex_flipped) Mode2D(camera)  {
+        draw_scene();
+    }
+    RenderTexture rtex_nflipped = LoadRenderTexture(width, height);
+    // flip texture
+    TextureMode(rtex_nflipped) {
+        DrawTexture(rtex_flipped.texture, 0, 0, WHITE);
+    }
+
+    UnloadRenderTexture(rtex_flipped);
+    return rtex_nflipped;
+}
+
 void app_update(void) {
     size_t temp_checkpoint = temp_save();
 
@@ -613,6 +705,7 @@ void app_update(void) {
                 .layout.layoutDirection = CLAY_LEFT_TO_RIGHT,
                 .layout.childGap = 5,
             }) {
+#ifndef PLATFORM_WEB
                 if (button(CLAY_ID("OpenImageButton"), CLAY_STRING("Open Image")).pressed) {
                     const char *filter_patterns[] = { "*.png", "*.jpg", "*.tga", "*.bmp", "*.psd", "*.gif", "*.hdr", "*.pic", "*.ppm" };
                     const char *path = tinyfd_openFileDialog("Add Image", NULL, ARRAY_LEN(filter_patterns), filter_patterns, "Image", 0);
@@ -621,7 +714,13 @@ void app_update(void) {
                             object_unload(object);
                         }
                         g->objects.count = 0;
-                        add_image_object(path);
+                        int size;
+                        unsigned char *data = LoadFileData(path, &size);
+                        if (data == NULL) {
+                            tinyfd_messageBox("Error opening image", temp_sprintf("Could not load image from %s", path), "ok", "error", 1);
+                        } else {
+                            add_image_object(path);
+                        }
                         g->canvas_bounds = g->objects.items[0].as_texture.rec;
                     }
                 }
@@ -629,34 +728,31 @@ void app_update(void) {
                     const char *filter_patterns[] = {"*.png", "*.bmp", "*.tga", "*.jpg", "*.hdr"};
                     const char *path = tinyfd_saveFileDialog("Export Image", NULL, ARRAY_LEN(filter_patterns), filter_patterns, "Image file");
                     if (path != NULL) {
-                        Camera2D camera = {
-                            .zoom = 1.0f,
-                            .offset = {-g->canvas_bounds.x, -g->canvas_bounds.y},
-                        };
-
-                        int width = g->canvas_bounds.width;
-                        int height = g->canvas_bounds.height;
-
-                        RenderTexture rtex_flipped = LoadRenderTexture(width, height);
-                        TextureMode(rtex_flipped) Mode2D(camera)  {
-                            draw_scene();
-                        }
-                        RenderTexture rtex_nflipped = LoadRenderTexture(width, height);
-                        // flip texture
-                        TextureMode(rtex_nflipped) {
-                            DrawTexture(rtex_flipped.texture, 0, 0, WHITE);
-                        }
-
-                        Image img = LoadImageFromTexture(rtex_nflipped.texture);
+                        RenderTexture rtex = export_image_to_render_texture();
+                        Image img = LoadImageFromTexture(rtex.texture);
                         if (!ExportImage(img, path)) {
                             tinyfd_messageBox("Error exporting image", temp_sprintf("Could not export image to %s", path), "ok", "error", 1);
                         }
                         UnloadImage(img);
-
-                        UnloadRenderTexture(rtex_flipped);
-                        UnloadRenderTexture(rtex_nflipped);
+                        UnloadRenderTexture(rtex);
                     }
                 }
+#else // defined(PLATFORM_WEB)
+                if (button(CLAY_ID("ExportButton"), CLAY_STRING("Export Image")).pressed) {
+                    RenderTexture rtex = export_image_to_render_texture();
+                    Image img = LoadImageFromTexture(rtex.texture);
+                    int file_size;
+                    unsigned char *data = ExportImageToMemory(img, ".png", &file_size);
+                    if (data == NULL) {
+                        // TODO: report error
+                    } else {
+                        save_file(data, file_size);
+                        free(data);
+                    }
+                    UnloadImage(img);
+                    UnloadRenderTexture(rtex);
+                }
+#endif // PLATFORM_WEB
             }
 
             tool_button(CLAY_ID("ChangeCanvasButton"), CLAY_STRING("ChangeCanvas"), TOOL_CHANGE_CANVAS);
@@ -700,13 +796,21 @@ void app_update(void) {
                     }));
                 }
             }
+#ifndef PLATFORM_WEB
             if (button(CLAY_ID("AddImageButton"), CLAY_STRING("Add Image")).pressed) {
                 const char *filter_patterns[] = { "*.png", "*.jpg", "*.tga", "*.bmp", "*.psd", "*.gif", "*.hdr", "*.pic", "*.ppm" };
                 const char *path = tinyfd_openFileDialog("Add Image", NULL, ARRAY_LEN(filter_patterns), filter_patterns, "Image", 0);
                 if (path != NULL) {
-                    add_image_object(path);
+                    int size;
+                    unsigned char *data = LoadFileData(path, &size);
+                    if (data == NULL) {
+                        tinyfd_messageBox("Error opening image", temp_sprintf("Could not load image from %s", path), "ok", "error", 1);
+                    } else {
+                        add_image_object(path);
+                    }
                 }
             }
+#endif // PLATFORM_WEB
 
             CLAY({
                 .id = CLAY_ID("ColorPickerLabelContainer"),
@@ -742,6 +846,12 @@ void app_update(void) {
             }
 
             CLAY({ .layout.sizing = { CLAY_SIZING_GROW(), CLAY_SIZING_GROW() }});
+
+            CLAY_TEXT(clay_string_from_cstr(temp_sprintf("Current Zoom Level: %f", g->camera.zoom)), CLAY_TEXT_CONFIG({
+                .fontSize = 30,
+                .textColor = {255, 255, 255, 255},
+            }));
+
 
             if (g->objects.count > 0) {
                 CLAY_TEXT(CLAY_STRING("Objects in Scene:"), CLAY_TEXT_CONFIG({
