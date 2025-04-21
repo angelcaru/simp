@@ -714,13 +714,7 @@ void app_update(void) {
                             object_unload(object);
                         }
                         g->objects.count = 0;
-                        int size;
-                        unsigned char *data = LoadFileData(path, &size);
-                        if (data == NULL) {
-                            tinyfd_messageBox("Error opening image", temp_sprintf("Could not load image from %s", path), "ok", "error", 1);
-                        } else {
-                            add_image_object(path);
-                        }
+                        add_image_object(path);
                         g->canvas_bounds = g->objects.items[0].as_texture.rec;
                     }
                 }
@@ -801,13 +795,7 @@ void app_update(void) {
                 const char *filter_patterns[] = { "*.png", "*.jpg", "*.tga", "*.bmp", "*.psd", "*.gif", "*.hdr", "*.pic", "*.ppm" };
                 const char *path = tinyfd_openFileDialog("Add Image", NULL, ARRAY_LEN(filter_patterns), filter_patterns, "Image", 0);
                 if (path != NULL) {
-                    int size;
-                    unsigned char *data = LoadFileData(path, &size);
-                    if (data == NULL) {
-                        tinyfd_messageBox("Error opening image", temp_sprintf("Could not load image from %s", path), "ok", "error", 1);
-                    } else {
-                        add_image_object(path);
-                    }
+                    add_image_object(path);
                 }
             }
 #endif // PLATFORM_WEB
