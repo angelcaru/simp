@@ -6,10 +6,6 @@
 
 #include "app.h"
 
-#ifdef PLATFORM_WEB
-    #include <emscripten/emscripten.h>
-#endif // PLATFORM_WEB
-
 #define X(name, ...) name##_t name;
 APP_FUNCS
 #undef X
@@ -70,9 +66,6 @@ int main(void) {
 
     app_init();
 
-#ifdef PLATFORM_WEB
-    emscripten_set_main_loop(app_update, 0, true);
-#else
     while (!WindowShouldClose()) {
 #ifdef HOTRELOAD
         if (should_reload_libapp || IsKeyPressed(KEY_F5)) {
@@ -82,7 +75,6 @@ int main(void) {
 #endif // HOTRELOAD
         app_update();
     }
-#endif // PLATFORM_WEB
 
     CloseWindow();
     return 0;

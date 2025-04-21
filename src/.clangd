@@ -2,7 +2,9 @@ CompileFlags:
   Add:
     - "-I.."
     - "-I../raylib"
+    - "-I../build"
     - "-I../clay"
     - "-I../tinyfiledialogs"
     - "-xc"
     - "-std=gnu11"
+    - "-DPLATFORM_WEB"
