@@ -24,6 +24,7 @@ Clay_String clay_string_from_cstr(const char *cstr) {
 
 #include "raylib.h"
 #include "raymath.h"
+#include "rlgl.h"
 #define MACRO_VAR(name) _##name##__LINE__
 #define BEGIN_END_NAMED(begin, end, i) for (int i = (begin, 0); i < 1; i++, end)
 #define BEGIN_END(begin, end) BEGIN_END_NAMED(begin, end, MACRO_VAR(i))
@@ -34,10 +35,47 @@ Clay_String clay_string_from_cstr(const char *cstr) {
 #define TextureMode(texture) BEGIN_END(BeginTextureMode(texture), EndTextureMode())
 #define ShaderMode(shader) BEGIN_END(BeginShaderMode(shader), EndShaderMode())
 
+// Same (including specific implementation) as LoadRenderTexture from raylib,
+// but the ability to specify pixel format.
+RenderTexture2D load_render_texture_with_pixel_format(int width, int height, PixelFormat pixel_format) {
+    RenderTexture2D target = {0};
+
+    target.id = rlLoadFramebuffer(); // Load an empty framebuffer
+
+    if (target.id > 0) {
+        rlEnableFramebuffer(target.id);
+
+        // Create color texture
+        target.texture.id = rlLoadTexture(NULL, width, height, pixel_format, 1);
+        target.texture.width = width;
+        target.texture.height = height;
+        target.texture.format = pixel_format;
+        target.texture.mipmaps = 1;
+
+        // Create depth renderbuffer/texture
+        target.depth.id = rlLoadTextureDepth(width, height, true);
+        target.depth.width = width;
+        target.depth.height = height;
+        target.depth.format = 19;       //DEPTH_COMPONENT_24BIT?
+        target.depth.mipmaps = 1;
+
+        // Attach color texture and depth renderbuffer/texture to FBO
+        rlFramebufferAttach(target.id, target.texture.id, RL_ATTACHMENT_COLOR_CHANNEL0, RL_ATTACHMENT_TEXTURE2D, 0);
+        rlFramebufferAttach(target.id, target.depth.id, RL_ATTACHMENT_DEPTH, RL_ATTACHMENT_RENDERBUFFER, 0);
+
+        // Check if fbo is complete with attachments (valid)
+        if (rlFramebufferComplete(target.id)) TraceLog(LOG_INFO, "FBO: [ID %i] Framebuffer object created successfully", target.id);
+
+        rlDisableFramebuffer();
+    }
+    else TraceLog(LOG_WARNING, "FBO: Framebuffer object can not be created");
+
+    return target;
+}
+
+
 #define MOUSE_BUTTON_PAN MOUSE_BUTTON_RIGHT
-#define MOUSE_BUTTON_MOVE_OBJECT MOUSE_BUTTON_LEFT
-#define MOUSE_BUTTON_DRAW_RECT MOUSE_BUTTON_LEFT
-#define MOUSE_BUTTON_DRAW MOUSE_BUTTON_LEFT
+#define MOUSE_BUTTON_TOOL MOUSE_BUTTON_LEFT
 
 #define OBJECT_RESIZE_HITBOX_SIZE 30
 #define HOVERED_OBJECT_OUTLINE_THICKNESS 5
@@ -53,6 +91,7 @@ typedef enum {
     OBJ_TEXTURE,
     OBJ_RECT,
     OBJ_STROKE,
+    OBJ_TEXT,
     COUNT_OBJS,
 } Object_Type;
 
@@ -71,11 +110,17 @@ typedef struct {
             Color color;
         } as_rect;
         Stroke as_stroke;
+        struct {
+            String_Builder text;
+            float size;
+            Color color;
+            Vector2 pos;
+        } as_text;
     };
 } Object;
 
 void object_unload(Object *object) {
-    static_assert(COUNT_OBJS == 3, "Exhaustive handling of object types in object_unload");
+    static_assert(COUNT_OBJS == 4, "Exhaustive handling of object types in object_unload");
     switch (object->type) {
         case OBJ_TEXTURE:
             UnloadTexture(object->as_texture.texture);
@@ -83,6 +128,9 @@ void object_unload(Object *object) {
         case OBJ_RECT: break;
         case OBJ_STROKE:
             da_free(object->as_stroke);
+            break;
+        case OBJ_TEXT:
+            da_free(object->as_text.text);
             break;
         case COUNT_OBJS:
         default: UNREACHABLE("invalid object type: you have a memory corruption somewhere. good luck");
@@ -96,53 +144,6 @@ void object_set_name(Object *object, String_View name) {
     object->name_len = count;
 }
 
-Rectangle object_get_bounding_box(const Object *object) {
-    static_assert(COUNT_OBJS == 3, "Exhaustive handling of object types in object_get_bounding_box");
-    switch (object->type) {
-        case OBJ_RECT: return object->as_rect.rec;
-        case OBJ_TEXTURE: return object->as_texture.rec;
-        case OBJ_STROKE: {
-            Vector2 min = {INFINITY, INFINITY};
-            Vector2 max = {-INFINITY, -INFINITY};
-
-            da_foreach(Vector2, point, &object->as_stroke) {
-                min = Vector2Min(min, *point);
-                max = Vector2Max(max, *point);
-            }
-
-            return (Rectangle) { min.x, min.y, max.x - min.x, max.y - min.y };
-        } break;
-        case COUNT_OBJS:
-        default: UNREACHABLE("invalid object type: you have a memory corruption somewhere. good luck");
-    }
-}
-
-void object_set_bounding_box(Object *object, Rectangle new) {
-    static_assert(COUNT_OBJS == 3, "Exhaustive handling of object types in object_set_bounding_box");
-    switch (object->type) {
-        case OBJ_RECT:    object->as_rect.rec = new; break;
-        case OBJ_TEXTURE: object->as_texture.rec = new; break;
-        case OBJ_STROKE: {
-            Rectangle old = object_get_bounding_box(object);
-            Vector2 old_min = {old.x, old.y};
-            Vector2 new_min = {new.x, new.y};
-            Vector2 old_size = {old.width, old.height};
-            Vector2 new_size = {new.width, new.height};
-
-            //Vector2 translate = Vector2Subtract(new_min, old_min);
-            Vector2 scale = Vector2Divide(new_size, old_size);
-
-            da_foreach(Vector2, point, &object->as_stroke) {
-                Vector2 old_point_rel = Vector2Subtract(*point, old_min);
-                Vector2 new_point_rel = Vector2Multiply(old_point_rel, scale);
-                *point = Vector2Add(new_point_rel, new_min);
-            }
-        } break;
-        case COUNT_OBJS:
-        default: UNREACHABLE("invalid object type: you have a memory corruption somewhere. good luck");
-    }
-}
-
 typedef struct {
     Object *items;
     size_t count, capacity;
@@ -152,6 +153,7 @@ typedef enum {
     TOOL_MOVE = 0,
     TOOL_RECT,
     TOOL_DRAW,
+    TOOL_TEXT,
     TOOL_CHANGE_CANVAS,
     COUNT_TOOLS,
 } Tool;
@@ -182,9 +184,73 @@ struct App {
     int hovered_object;
     Stroke current_stroke;
     float stroke_weight;
+
+    Object *current_text_object;
 };
 
 App *g;
+
+
+Rectangle object_get_bounding_box(const Object *object) {
+    static_assert(COUNT_OBJS == 4, "Exhaustive handling of object types in object_get_bounding_box");
+    switch (object->type) {
+        case OBJ_RECT: return object->as_rect.rec;
+        case OBJ_TEXTURE: return object->as_texture.rec;
+        case OBJ_STROKE: {
+            Vector2 min = {INFINITY, INFINITY};
+            Vector2 max = {-INFINITY, -INFINITY};
+
+            da_foreach(Vector2, point, &object->as_stroke) {
+                min = Vector2Min(min, *point);
+                max = Vector2Max(max, *point);
+            }
+
+            return (Rectangle) { min.x, min.y, max.x - min.x, max.y - min.y };
+        } break;
+        case OBJ_TEXT: {
+            Vector2 size = MeasureTextEx(g->font,
+                                         temp_sprintf(SV_Fmt, SV_Arg(sb_to_sv(object->as_text.text))),
+                                         object->as_text.size,
+                                         1.0f);
+
+            Vector2 pos = object->as_text.pos;
+            Rectangle bounding_box = {pos.x, pos.y, size.x, size.y};
+            return bounding_box;
+        } break;
+        case COUNT_OBJS:
+        default: UNREACHABLE("invalid object type: you have a memory corruption somewhere. good luck");
+    }
+}
+
+void object_set_bounding_box(Object *object, Rectangle new) {
+    static_assert(COUNT_OBJS == 4, "Exhaustive handling of object types in object_set_bounding_box");
+    switch (object->type) {
+        case OBJ_RECT:    object->as_rect.rec = new; break;
+        case OBJ_TEXTURE: object->as_texture.rec = new; break;
+        case OBJ_STROKE: {
+            Rectangle old = object_get_bounding_box(object);
+            Vector2 old_min = {old.x, old.y};
+            Vector2 new_min = {new.x, new.y};
+            Vector2 old_size = {old.width, old.height};
+            Vector2 new_size = {new.width, new.height};
+
+            //Vector2 translate = Vector2Subtract(new_min, old_min);
+            Vector2 scale = Vector2Divide(new_size, old_size);
+
+            da_foreach(Vector2, point, &object->as_stroke) {
+                Vector2 old_point_rel = Vector2Subtract(*point, old_min);
+                Vector2 new_point_rel = Vector2Multiply(old_point_rel, scale);
+                *point = Vector2Add(new_point_rel, new_min);
+            }
+        } break;
+        case OBJ_TEXT: {
+            object->as_text.pos.x = new.x;
+            object->as_text.pos.y = new.y;
+        } break;
+        case COUNT_OBJS:
+        default: UNREACHABLE("invalid object type: you have a memory corruption somewhere. good luck");
+    }
+}
 
 void handle_clay_error(Clay_ErrorData error) {
     nob_log(ERROR, "Clay Error: %.*s", error.errorText.length, error.errorText.chars);
@@ -426,10 +492,10 @@ void update_main_area(void) {
     }
 
     float object_resize_hitbox_size = OBJECT_RESIZE_HITBOX_SIZE / g->camera.zoom;
-    bool is_move_down = IsMouseButtonDown(MOUSE_BUTTON_MOVE_OBJECT);
+    bool is_move_down = IsMouseButtonDown(MOUSE_BUTTON_TOOL);
     Vector2 mouse_pos = GetScreenToWorld2D(GetMousePosition(), g->camera);
     int mouse_cursor = MOUSE_CURSOR_DEFAULT;
-    static_assert(COUNT_TOOLS == 4, "Exhaustive handling of tools in update_main_area");
+    static_assert(COUNT_TOOLS == 5, "Exhaustive handling of tools in update_main_area");
     switch (g->tool) {
         case TOOL_MOVE: if (g->objects.count > 0) {
             for (Object *object = g->objects.items + g->objects.count - 1; object >= g->objects.items; object--) {
@@ -524,12 +590,48 @@ void update_main_area(void) {
                 break;
             }
         } break;
+        case TOOL_TEXT:
+            if (IsMouseButtonPressed(MOUSE_BUTTON_TOOL)) {
+                Object object = {
+                    .type = OBJ_TEXT,
+                    .as_text = {
+                        .text = {0},
+                        .size = 69,
+                        .color = g->current_color,
+                        .pos = mouse_pos,
+                    }
+                };
+                da_append(&g->objects, object);
+                g->current_text_object = &g->objects.items[g->objects.count - 1];
+            }
+
+            if (g->current_text_object != NULL) {
+                assert(g->current_text_object->type == OBJ_TEXT);
+                g->hovered_object = g->current_text_object - g->objects.items;
+                String_Builder *text = &g->current_text_object->as_text.text;
+
+                if (IsKeyPressed(KEY_ESCAPE)) g->tool = TOOL_MOVE;
+
+                if (IsKeyPressed(KEY_BACKSPACE) || IsKeyPressedRepeat(KEY_BACKSPACE)) {
+                    text->count--;
+                }
+
+                int key = GetCharPressed();
+                while (key > 0) {
+                    if (!iscntrl(key)) {
+                        da_append(text, key);
+                    }
+                    key = GetCharPressed();
+                }
+                object_set_name(g->current_text_object, sb_to_sv(*text));
+            }
+            break;
         case TOOL_RECT:
-            if (IsMouseButtonPressed(MOUSE_BUTTON_DRAW_RECT)) {
+            if (IsMouseButtonPressed(MOUSE_BUTTON_TOOL)) {
                 g->rect_start = mouse_pos;
             }
 
-            if (IsMouseButtonReleased(MOUSE_BUTTON_DRAW_RECT)) {
+            if (IsMouseButtonReleased(MOUSE_BUTTON_TOOL)) {
                 Object object = {
                     .type = OBJ_RECT,
                     .as_rect = {
@@ -542,16 +644,16 @@ void update_main_area(void) {
             }
             break;
         case TOOL_CHANGE_CANVAS:
-            if (IsMouseButtonPressed(MOUSE_BUTTON_DRAW_RECT)) {
+            if (IsMouseButtonPressed(MOUSE_BUTTON_TOOL)) {
                 g->rect_start = mouse_pos;
             }
 
-            if (IsMouseButtonReleased(MOUSE_BUTTON_DRAW_RECT)) {
+            if (IsMouseButtonReleased(MOUSE_BUTTON_TOOL)) {
                 g->canvas_bounds = get_current_rect();
             }
             break;
         case TOOL_DRAW:
-            if (IsMouseButtonPressed(MOUSE_BUTTON_DRAW)) {
+            if (IsMouseButtonPressed(MOUSE_BUTTON_TOOL)) {
                 assert(g->current_stroke.items == NULL
                     && g->current_stroke.count == 0
                     && g->current_stroke.capacity == 0);
@@ -559,11 +661,11 @@ void update_main_area(void) {
                 g->current_stroke.weight = g->stroke_weight;
             }
 
-            if (IsMouseButtonDown(MOUSE_BUTTON_DRAW)) {
+            if (IsMouseButtonDown(MOUSE_BUTTON_TOOL)) {
                 da_append(&g->current_stroke, mouse_pos);
             }
 
-            if (IsMouseButtonReleased(MOUSE_BUTTON_DRAW)) {
+            if (IsMouseButtonReleased(MOUSE_BUTTON_TOOL)) {
                 Object object = {
                     .type = OBJ_STROKE,
                     .as_stroke = g->current_stroke,
@@ -589,7 +691,7 @@ void draw_stroke(Stroke stroke) {
 
 void draw_scene(void) {
     da_foreach(Object, object, &g->objects) {
-        static_assert(COUNT_OBJS == 3, "Exhaustive handling of object types in draw_scene");
+        static_assert(COUNT_OBJS == 4, "Exhaustive handling of object types in draw_scene");
         switch (object->type) {
             case OBJ_TEXTURE: {
                 Texture texture = object->as_texture.texture;
@@ -601,6 +703,16 @@ void draw_scene(void) {
             } break;
             case OBJ_STROKE: {
                 draw_stroke(object->as_stroke);
+            } break;
+            case OBJ_TEXT: {
+                sb_append_null(&object->as_text.text);
+                DrawTextEx(g->font,
+                           object->as_text.text.items,
+                           object->as_text.pos,
+                           object->as_text.size,
+                           1.0f,
+                           object->as_text.color);
+                object->as_text.text.count--;
             } break;
             case COUNT_OBJS:
             default: UNREACHABLE("invalid object type: you have a memory corruption somewhere. good luck");
@@ -644,8 +756,8 @@ RenderTexture export_image_to_render_texture(void) {
     int width = g->canvas_bounds.width;
     int height = g->canvas_bounds.height;
 
-    RenderTexture rtex_flipped = LoadRenderTexture(width, height);
-    TextureMode(rtex_flipped) Mode2D(camera)  {
+    RenderTexture rtex_flipped = load_render_texture_with_pixel_format(width, height, PIXELFORMAT_UNCOMPRESSED_R8G8B8);
+    TextureMode(rtex_flipped) Mode2D(camera) {
         draw_scene();
     }
     RenderTexture rtex_nflipped = LoadRenderTexture(width, height);
@@ -675,7 +787,7 @@ void app_update(void) {
         UnloadDroppedFiles(files);
     }
 
-    if (IsKeyPressed(KEY_D)) {
+    if (IsKeyPressed(KEY_LEFT_CONTROL) && IsKeyPressed(KEY_D)) {
         Clay_SetDebugModeEnabled(!Clay_IsDebugModeEnabled());
     }
 
@@ -723,6 +835,7 @@ void app_update(void) {
                             object_unload(object);
                         }
                         g->objects.count = 0;
+                        g->current_text_object = NULL;
                         add_image_object(path);
                         g->canvas_bounds = g->objects.items[0].as_texture.rec;
                     }
@@ -761,6 +874,7 @@ void app_update(void) {
             tool_button(CLAY_ID("ChangeCanvasButton"), CLAY_STRING("ChangeCanvas"), TOOL_CHANGE_CANVAS);
             tool_button(CLAY_ID("MoveButton"), CLAY_STRING("Move"), TOOL_MOVE);
             tool_button(CLAY_ID("RectangleButton"), CLAY_STRING("Rectangle"), TOOL_RECT);
+            tool_button(CLAY_ID("TextButton"), CLAY_STRING("Text"), TOOL_TEXT);
             CLAY({
                 .id = CLAY_ID("DrawButtonContainer"),
                 .layout.layoutDirection = CLAY_LEFT_TO_RIGHT,
@@ -901,6 +1015,7 @@ void app_update(void) {
                             }
                             if (button((Clay_ElementId) {0}, CLAY_STRING("Remove")).pressed) {
                                 size_t i = object - g->objects.items;
+                                g->current_text_object = NULL;
                                 object_unload(object);
                                 nob_log(INFO, "Removing object %zu (%.*s)", i, (int)object->name_len, object->name);
                                 memmove(object, object + 1, (g->objects.count - i - 1) * sizeof(*object));
@@ -933,13 +1048,13 @@ void app_update(void) {
             draw_scene();
 
             if (CheckCollisionPointRec(GetMousePosition(), main_area)) {
-                if (g->tool == TOOL_RECT && IsMouseButtonDown(MOUSE_BUTTON_DRAW_RECT)) {
+                if (g->tool == TOOL_RECT && IsMouseButtonDown(MOUSE_BUTTON_TOOL)) {
                     DrawRectangleRec(get_current_rect(), g->current_color);
                 }
-                if (g->tool == TOOL_CHANGE_CANVAS && IsMouseButtonDown(MOUSE_BUTTON_DRAW_RECT)) {
+                if (g->tool == TOOL_CHANGE_CANVAS && IsMouseButtonDown(MOUSE_BUTTON_TOOL)) {
                     DrawRectangleLinesEx(get_current_rect(), 5, WHITE);
                 }
-                if (g->tool == TOOL_DRAW && IsMouseButtonDown(MOUSE_BUTTON_DRAW)) {
+                if (g->tool == TOOL_DRAW && IsMouseButtonDown(MOUSE_BUTTON_TOOL)) {
                     draw_stroke(g->current_stroke);
                 }
             }
